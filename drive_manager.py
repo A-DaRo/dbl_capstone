@@ -1,6 +1,8 @@
 import os
 import io
 import google.auth
+from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
@@ -172,6 +174,45 @@ class Drive_Manager:
             print(f'API error while searching for "{name}": {error}')
             return None
 
+    def find_item_by_path(self, path: str) -> Optional[Dict]:
+        """
+        Traverses a path string from the root to find a specific file or folder.
+        
+        Args:
+            path: A string path like "folderA/folderB/file.txt". The path is
+                  relative to the manager's root folder.
+            
+        Returns:
+            The Drive API item dictionary (with id, name, mimeType) or None if not found.
+        """
+        print(f"Searching for path from root: '{path}'")
+        # Clean up path, removing leading/trailing slashes and splitting
+        parts = [part for part in path.split('/') if part]
+        
+        # Start the search from the manager's root folder
+        current_id = self.root_id
+        current_item = None
+        
+        for i, part in enumerate(parts):
+            print(f"  -> Searching for '{part}'...")
+            # Use the instance's own method to find the item
+            current_item = self.get_item_in_folder(part, current_id)
+            
+            if not current_item:
+                print(f"Error: Could not find '{part}' in the path.")
+                return None
+            
+            current_id = current_item.get('id')
+            print(f"     Found '{part}' with ID: {current_id}")
+
+            # If it's not the last part, it must be a folder to continue
+            is_last_part = (i == len(parts) - 1)
+            if not is_last_part and current_item.get('mimeType') != 'application/vnd.google-apps.folder':
+                print(f"Error: '{part}' is a file, but the path continues. Invalid path.")
+                return None
+                
+        return current_item
+
     def read_file_content(self, file_id: str) -> Optional[bytes]:
         """
         Reads the entire content of a file into memory.
@@ -268,4 +309,144 @@ class Drive_Manager:
         except Exception as e:
             print(f"An unexpected error occurred during download: {e}")
 
-    
+    def download_directory(self, local_destination_path: str, drive_folder_id: Optional[str] = None, max_workers: int = 8, overwrite: bool = False) -> None:
+        """
+        Downloads the entire content of a Google Drive folder using multiple concurrent workers.
+
+        This method first scans the entire directory structure, then uses a thread pool
+        to download files concurrently, displaying a single progress bar for the operation.
+
+        Args:
+            local_destination_path (str): The path to the local directory where the
+                                          content will be saved. It will be created
+                                          if it doesn't exist.
+            drive_folder_id (Optional[str], optional): The ID of the Drive folder to download.
+                                                       If None, the current working directory
+                                                       of the manager is used. Defaults to None.
+            max_workers (int, optional): The maximum number of concurrent download threads.
+                                         Defaults to 8.
+            overwrite (bool, optional): If False (default), files that already exist in the
+                                        destination path will be skipped. If True, existing
+                                        files will be overwritten.
+        """
+        target_folder_id = drive_folder_id or self.current_folder_id
+
+        try:
+            # --- PASS 1: Scan the directory to get a complete list of all files ---
+            print("Scanning directory structure...")
+            all_files, _ = self._get_directory_contents_recursive(target_folder_id)
+
+            if not all_files:
+                print("No files found in the specified Drive directory.")
+                return
+            
+            # --- FILTERING STEP: Decide which files actually need to be downloaded ---
+            files_to_download = []
+            if not overwrite:
+                print("Overwrite is False. Checking for existing files to skip...")
+                for f in all_files:
+                    destination_path = os.path.join(local_destination_path, f['local_path'])
+                    if not os.path.exists(destination_path):
+                        files_to_download.append(f)
+                
+                skipped_count = len(all_files) - len(files_to_download)
+                if skipped_count > 0:
+                    print(f"Skipped {skipped_count} files that already exist locally.")
+            else:
+                print("Overwrite is True. All files will be downloaded.")
+                files_to_download = all_files
+            
+            # --- Check if there's anything left to do ---
+            if not files_to_download:
+                print("All files already exist locally. Nothing to download.")
+                return
+
+            # --- PREPARATION for PASS 2: Calculate size and create directories ---
+            total_size_to_download = sum(f['size'] for f in files_to_download)
+            
+            print(f"Starting download of {len(files_to_download)} files (Total size: {total_size_to_download / (1024*1024):.2f} MB) using up to {max_workers} workers.")
+            print(f"Destination: '{os.path.abspath(local_destination_path)}'")
+
+            # --- PASS 2: Download files concurrently with a single progress bar ---
+            with tqdm(total=total_size_to_download, unit='B', unit_scale=True, unit_divisor=1024, desc="Downloading") as pbar:
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    # Create all local directories beforehand to prevent race conditions.
+                    # This is based on the filtered list of files to download.
+                    all_local_dirs = {os.path.dirname(os.path.join(local_destination_path, f['local_path'])) for f in files_to_download}
+                    for d in all_local_dirs:
+                        os.makedirs(d, exist_ok=True)
+                    
+                    # Submit only the filtered download tasks to the thread pool
+                    futures = [
+                        executor.submit(
+                            self._download_file_and_update_progress,
+                            file_info['id'],
+                            os.path.join(local_destination_path, file_info['local_path']),
+                            pbar
+                        )
+                        for file_info in files_to_download
+                    ]
+                    # The 'with' block implicitly waits for all futures to complete.
+
+            print("\nDirectory download completed successfully.")
+
+        except HttpError as error:
+            print(f'An API error occurred: Could not process folder ID {target_folder_id}. {error}')
+        except Exception as e:
+            print(f"An unexpected error occurred during directory download: {e}")
+
+    def _get_directory_contents_recursive(self, folder_id: str, current_path: str = "") -> Tuple[List[Dict], int]:
+        """
+        Recursively scans a Drive folder to get a flat list of all files and the total size.
+        This remains a sequential operation to safely build the file list.
+        """
+        all_files = []
+        total_size = 0
+
+        # Use a list to hold iterators to avoid exhausting them prematurely
+        iterators = [self.iter_files(folder_id), self.iter_subdirectories(folder_id)]
+        
+        # Get files in the current directory
+        for file_item in iterators[0]:
+            file_size = int(file_item.get('size', 0))
+            all_files.append({
+                'id': file_item['id'],
+                'name': file_item['name'],
+                'size': file_size,
+                'local_path': os.path.join(current_path, file_item['name'])
+            })
+            total_size += file_size
+
+        # Recurse into subdirectories
+        for subdir_item in iterators[1]:
+            new_path = os.path.join(current_path, subdir_item['name'])
+            sub_files, sub_size = self._get_directory_contents_recursive(subdir_item['id'], new_path)
+            all_files.extend(sub_files)
+            total_size += sub_size
+            
+        return all_files, total_size
+
+    def _download_file_and_update_progress(self, file_id: str, destination_path: str, pbar: tqdm) -> None:
+        """
+        Downloads a single file and updates the provided thread-safe tqdm progress bar.
+        This function is designed to be called from multiple threads.
+        """
+        try:
+            # Each thread needs its own authorized service instance to be thread-safe.
+            # Building it is cheap as credentials are cached.
+            service = self._initialize_service()
+            request = service.files().get_media(fileId=file_id)
+
+            with io.FileIO(destination_path, 'wb') as fh:
+                downloader = MediaIoBaseDownload(fh, request)
+                done = False
+                while not done:
+                    last_pos = fh.tell()
+                    _, done = downloader.next_chunk()
+                    bytes_downloaded = fh.tell() - last_pos
+                    pbar.update(bytes_downloaded)
+
+        except HttpError as error:
+            pbar.write(f"Warning: API error downloading file ID {file_id} to '{destination_path}'. Error: {error}")
+        except Exception as e:
+            pbar.write(f"Warning: Unexpected error downloading file ID {file_id}. Error: {e}")
