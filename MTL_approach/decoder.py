@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from typing import List
 
 # Assumes attention_module.py is in the same directory
-from attention_module import MultiTaskCrossAttentionModule
+from MTL_approach.attention_module import MultiTaskCrossAttentionModule
 
 class CoralMTLDecoder(nn.Module):
     """
