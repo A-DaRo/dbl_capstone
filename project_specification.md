@@ -1,0 +1,248 @@
+### **Extensive Description of the Coral-MTL Model and Pipeline**
+
+#### **1. The Task: Hierarchical Semantic Segmentation of Coral Reefs**
+
+The overarching goal of this project is the automated, pixel-level understanding of underwater coral reef imagery for ecological monitoring. Traditional semantic segmentation often treats all classes equally. Our approach, however, re-frames the problem as a **hierarchical multi-task learning challenge**, acknowledging that different semantic classes serve different purposes in the analysis. The tasks are divided into two distinct categories:
+
+**1.1. Primary Tasks: The Core Ecological Objectives**
+These are the central outputs of our model, providing the most critical information for marine biologists and reef managers. They are complex tasks requiring nuanced, high-fidelity predictions.
+
+*   **Genus Segmentation:** This is a fine-grained shape and morphology recognition task. The model must learn to differentiate between the distinct structural forms of various coral genera present in the dataset. For example, it must distinguish the intricate, branching patterns of *Acropora*, the massive, boulder-like shapes of *Porites* and other meandering corals, and the flat, tabular structures of *Table Acropora*. The output is a pixel-wise map where each pixel is assigned to a specific coral genus or a non-coral background.
+
+*   **Health Segmentation:** This is primarily a colorimetric and textural analysis task. The model must classify coral pixels into one of three critical health states based on their appearance:
+    *   **Healthy/Live:** Characterized by vibrant, natural pigmentation.
+    *   **Bleached:** Characterized by a stark white appearance due to the expulsion of symbiotic algae.
+    *   **Dead:** Characterized by a dull color, often covered in turf algae or sediment, but still retaining the underlying coral skeleton structure.
+    The output is a pixel-wise map of coral health status.
+
+**1.2. Auxiliary Tasks: Contextual Understanding and Noise Regularization**
+These tasks are not primary ecological outputs but are crucial for improving the performance and robustness of the primary tasks. They are designed to explicitly model and disentangle the main sources of "noise" and contextual ambiguity in the underwater survey images.
+
+*   **Fish Segmentation:** Models dynamic occluders. The model learns to identify and segment fish, which frequently obscure parts of the coral. This forces the shared feature encoder to learn representations that are robust to such occlusions.
+*   **Human-Artifact Segmentation:** Models static and dynamic survey-related objects. This task merges several related classes from the original dataset (`Human`, `Transect Tools`, `Transect Line`, `Trash`) into a single category. It teaches the model to identify objects that are not part of the natural reef, preventing them from being confused with corals.
+*   **Substrate Segmentation:** Models the surrounding ecological context. This task identifies key non-coral seabed types, such as `Sand` and `Seagrass`. This provides the model with contextual priors that can help in differentiating corals from similarly textured backgrounds or in identifying likely locations for certain coral types.
+
+#### **2. The Dataset and Pre-processing Pipeline: Coralscapes**
+
+Our model is trained on the **Coralscapes dataset**, a comprehensive collection of high-resolution underwater images with dense, pixel-level annotations for 39 distinct benthic classes. The core of our data pipeline involves a crucial pre-processing step to transform these 39 monolithic labels into a structured set of ground-truth masks, one for each of our defined tasks.
+
+**2.1. The Label Transformation Pipeline**
+For every annotated training image, we generate a corresponding set of ground-truth masks. This is a deterministic mapping process:
+
+*   **Input:** A single ground-truth mask of size (H, W), where each pixel has one of 39 integer class labels.
+
+*   **Output:** A stack of ground-truth masks, each corresponding to one of our task heads.
+
+    *   **Genus Mask:**
+        *   Pixels labeled `Acropora Alive`, `Acropora Bleached`, or `Acropora Dead` are mapped to the integer class `Acropora`.
+        *   Pixels labeled `Pocillopora Alive` are mapped to the integer class `Pocillopora`.
+        *   ... and so on for all coral genera.
+        *   All other pixels (fish, sand, human, etc.) are mapped to a `Background` class.
+
+    *   **Health Mask:**
+        *   Pixels labeled with any "Alive" coral class (e.g., `Acropora Alive`, `Stylophora Alive`) are mapped to the integer class `Healthy`.
+        *   Pixels labeled with any "Bleached" coral class are mapped to the integer class `Bleached`.
+        *   Pixels labeled with any "Dead" coral class are mapped to the integer class `Dead`.
+        *   All non-coral pixels are mapped to a `Background` class.
+
+    *   **Fish Mask (Binary):**
+        *   Pixels labeled `Fish` are mapped to the integer class `Fish`.
+        *   All other pixels are mapped to `Background`.
+
+    *   **Human-Artifact Mask (Binary):**
+        *   Pixels labeled `Human`, `Transect Tools`, `Transect Line`, or `Trash` are mapped to the integer class `Human-Artifact`.
+        *   All other pixels are mapped to `Background`.
+
+    *   **Substrate Mask:**
+        *   Pixels labeled `Sand` are mapped to the class `Sand`.
+        *   Pixels labeled `Seagrass` are mapped to the class `Seagrass`.
+        *   Pixels labeled `Hard Substrate` or `Rubble` are merged and mapped to the class `Rock/Rubble`.
+        *   All other pixels are mapped to `Background`.
+
+This pipeline transforms the flat, 39-class problem into a structured, multi-faceted dataset perfectly aligned with our hierarchical multi-task model architecture.
+
+#### **3. The Model Architecture: A Hierarchical Context-Aware MTL Framework**
+
+Our model, inspired by SegFormer and MTLSegFormer, is a novel Transformer-based architecture designed for explicit, context-aware information exchange between tasks. It consists of a shared encoder and an asymmetric, multi-stream decoder.
+
+**3.1. The Shared Encoder: Mix Transformer (MiT)**
+The foundation of the model is a single, shared **SegFormer MiT encoder** (e.g., MiT-B2 or MiT-B5). Its role is to process the input RGB image and extract a rich, shared representation of low-level and mid-level visual features.
+*   **Mechanism:** It takes the image, divides it into overlapping patches, and processes them through a series of hierarchical Transformer blocks. These blocks use an efficient self-attention mechanism to capture both local and global context.
+*   **Output:** It produces four multi-scale feature maps (**F1, F2, F3, F4**), which serve as the common input for all subsequent decoder streams.
+
+**3.2. The Asymmetric Decoder: Primary and Auxiliary Streams**
+After the shared encoder, the model branches into five parallel streams with decoders of varying complexity, reflecting the hierarchy of our tasks.
+
+*   **Primary Streams (Genus & Health):** These two streams are equipped with full, multi-layer **All-MLP decoders**, as in the original SegFormer. Each decoder takes the four encoder feature maps (F1-F4), unifies their channel dimensions, upsamples them to a common resolution (H/4 x W/4), and concatenates them.
+    *   **Output:** Two dense, high-capacity feature tensors, **`F_genus`** and **`F_health`**, ready for complex reasoning and refinement.
+
+*   **Auxiliary Streams (Fish, Human-Artifact, Substrate):** These three streams use **lightweight decoder heads**. Each head is a much simpler module, likely a single 1x1 convolutional layer, that performs the same concatenation and fusion of encoder features but without the deep, multi-layer refinement.
+    *   **Output:** Three compact context feature tensors: **`F_fish`**, **`F_human_artifact`**, and **`F_substrate`**.
+
+**3.3. The Core Innovation: The Expanded Cross-Attention Module**
+This module is the hub for information exchange and is integrated exclusively within the two Primary Streams. It allows the Genus and Health tasks to query the contextual information generated by all other tasks.
+
+1.  **Context Block Formation:** The feature tensors from the non-querying tasks are used to form a single, powerful "context block." For example, when the Genus task is querying, the context block is formed by:
+    *   Generating Key (K) and Value (V) matrices from `F_health`, `F_fish`, `F_human_artifact`, and `F_substrate`.
+    *   Concatenating these matrices to form **`K_context`** and **`V_context`**.
+
+2.  **Attention Mechanism:** The primary task generates a Query (Q) from its own feature map (e.g., **`Q_genus`** from `F_genus`). It then performs scaled dot-product attention against the entire context block:
+    *   `Enriched_F_genus = Attention(Q_genus, K_context, V_context)`
+    This operation produces a new feature map for the Genus task that is enriched with relevant information from all other tasks. The same process is repeated for the Health task.
+
+**3.4. Final Integration and Prediction Heads**
+The final step integrates the enriched information and produces the output masks.
+*   **Integration:** The enriched feature maps are added back to the original primary feature maps via a residual connection:
+    *   `Final_F_genus = F_genus + Enriched_F_genus`
+    *   `Final_F_health = F_health + Enriched_F_health`
+*   **Prediction:** Each of the five streams (two primary, three auxiliary) has its own final 1x1 convolutional layer that acts as a prediction head, projecting the final feature tensor for that stream to the correct number of class channels and producing the five output segmentation masks.
+
+### **Detailed Specification of the Training Pipeline Components**
+
+#### **1. Data Sampling Strategy: Context-Aware Spatial Sampling**
+
+To address the severe spatial imbalance in the Coralscapes dataset (where vast areas of background surround small, information-rich coral patches), we will **not** use a naive random patch cropping method. Instead, we adopt a **Context-Aware Spatial Sampling** strategy, based on the principles of Poisson Disk Sampling (PDS), to create a high-quality, spatially representative pool of training patches.
+
+*   **Objective:** To generate a training dataset where patches are guaranteed to contain objects of interest, while also ensuring the sampling covers the full area without excessive clustering or overlap. This ensures the model trains on information-rich data.
+
+*   **Mechanism: Poisson Disk Sampling (PDS)**
+    1.  **Seed Point Selection:** The PDS algorithm is seeded using the ground-truth annotation masks. A "foreground mask" is created, which includes all pixels belonging to any coral class.
+    2.  **Dart Throwing Algorithm:** The algorithm iteratively "throws darts" (selects random pixel coordinates) onto the image.
+        *   If a dart lands on a pixel within the **foreground mask**, it is considered a potential sample center.
+        *   This potential center is only accepted if it is no closer than a specified minimum distance, `r`, to any previously accepted sample center.
+    3.  **Patch Extraction:** Once the algorithm terminates, a fixed-size square patch (e.g., 512x512 pixels) is extracted, centered on each of the accepted sample points.
+    4.  **Class-Related Radius (Context-Aware Refinement):** This is a crucial refinement to the standard PDS. The minimum distance `r` is not a single global value. Instead, it is adapted based on the local class density. In regions dominated by sparse, minority coral genera, `r` might be smaller to allow for more frequent sampling. In areas with dense, common genera, `r` could be larger to prevent over-representation of a single large colony. This ensures the resulting patch dataset captures the varied ecological contexts and local densities of the reef.
+
+*   **Pipeline Integration:** This sampling process is a **pre-processing step**. It is run once on the full-resolution training orthomosaics to generate a static pool of high-quality image patches. The model's data loader will then draw mini-batches directly from this pre-generated pool during training.
+
+#### **2. Sample Augmentation Pipeline**
+
+To improve model generalization and prevent overfitting, each patch drawn from the data loader is passed through a sequence of on-the-fly data augmentations. These are divided into two categories: geometric and colorimetric. Both the image patch and its corresponding stack of ground-truth masks are transformed together for geometric augmentations.
+
+*   **Geometric Augmentations:** These teach the model spatial invariance.
+    *   **Random Horizontal Flip:** Applied with a 50% probability.
+    *   **Random Vertical Flip:** Applied with a 50% probability.
+    *   **Random Rotation:** Rotation by a random angle within a specified range (e.g., -15 to +15 degrees). The image is scaled to ensure no corners are lost, then cropped back to the original patch size.
+    *   **Random Resized Crop:** The patch is randomly cropped to a smaller size and then resized back to the original dimensions (e.g., 512x512). This teaches the model scale invariance.
+
+*   **Colorimetric Augmentations:** These are applied **only to the input image patch** and simulate the challenging and variable underwater lighting conditions. They make the model more robust to changes in color, brightness, and water clarity.
+    *   **Color Jitter:** Randomly adjusts the brightness, contrast, saturation, and hue of the image within a defined range. For example, brightness factor between [0.8, 1.2].
+    *   **Gaussian Blur:** Applies a Gaussian blur with a randomly selected kernel size to simulate water turbidity.
+    *   **Channel-wise Normalization:** Each color channel (R, G, B) is normalized by subtracting the ImageNet mean and dividing by the ImageNet standard deviation. This is a standard practice for models using ImageNet pre-trained backbones.
+
+#### **3. Optimizer**
+
+To update the model's weights during training, we will use an optimizer that is well-suited for vision transformers and robust to the complexities of multi-task training.
+
+*   **Optimizer:** **AdamW (Adam with Decoupled Weight Decay)**.
+    *   **Justification:** AdamW is the standard and recommended optimizer for training Transformer-based models, including SegFormer. Unlike standard Adam, it decouples the weight decay from the gradient-based updates, which has been shown to lead to better generalization.
+*   **Hyperparameters:**
+    *   **Initial Learning Rate:** A small initial learning rate will be used, typical for fine-tuning pre-trained models (e.g., `6e-5`).
+    *   **Weight Decay:** A standard value will be used to provide regularization (e.g., `0.01`).
+    *   **Betas:** Default values of `(0.9, 0.999)` will be used for the AdamW moments.
+*   **Learning Rate Scheduler:** A static learning rate is suboptimal. We will use a scheduler to adjust the learning rate during training.
+    *   **Scheduler:** **Polynomial Decay ("Poly" LR Schedule)** with a linear warm-up.
+    *   **Mechanism:** The learning rate will start very low, linearly increase to the initial learning rate over a small number of "warm-up" epochs (e.g., 1,500 iterations), and then slowly decay towards zero over the remainder of the training following a polynomial function. This warm-up phase is critical for stabilizing the training of large Transformer models in the early stages.
+
+#### **4. Loss Function**
+
+The loss function is a composite, multi-part objective that reflects the hierarchical nature of our tasks and is designed to handle class imbalance and promote clean boundaries.
+
+*   **Total Loss (`L_total`):** The total loss is a weighted sum of the losses from each of the task heads.
+    `L_total = L_primary + w_aux * L_auxiliary`
+
+*   **Primary Task Loss (`L_primary`):** This is the core component, using uncertainty-based weighting to automatically balance the Genus and Health tasks.
+    `L_primary = (1/σ_genus²) * L_genus + (1/σ_health²) * L_health + log(σ_genus * σ_health)`
+    *   `σ_genus` and `σ_health` are learnable parameters representing the uncertainty of each primary task. The model learns to down-weight the noisier or more difficult task.
+    *   `L_genus` and `L_health` are the per-task loss functions, defined as a **hybrid loss**:
+        **`L_task = α * L_Focal + (1-α) * L_Dice`**
+        *   **`L_Focal` (Focal Loss):** Addresses the severe class imbalance *within* each task (e.g., common vs. rare genera) by focusing the model on hard-to-classify examples.
+        *   **`L_Dice` (Dice Loss):** Directly optimizes for spatial overlap (IoU) and heavily penalizes fragmented, noisy predictions, thereby enforcing the "nitid shapes" objective.
+        *   `α` is a hyperparameter balancing the two loss components (e.g., `α=0.5`).
+
+*   **Auxiliary Task Loss (`L_auxiliary`):** This is the sum of the losses from the simpler auxiliary heads.
+    `L_auxiliary = L_fish + L_human_artifact + L_substrate`
+    *   Each of these individual losses (`L_fish`, etc.) will be a standard **Weighted Cross-Entropy Loss**. Since their purpose is regularization and context, a simpler loss function is sufficient. Class weights can be applied to handle any minor imbalance within these simpler tasks.
+    *   `w_aux` is a fixed, small hyperparameter (e.g., `0.2` or `0.4`) that ensures the auxiliary tasks contribute to the learning process as regularizers without overpowering the primary learning objectives.
+
+### **1. Evaluation Metrics**
+
+To rigorously assess the performance of our hierarchical multi-task model, we will employ a suite of metrics that evaluate not only pixel-level accuracy but also the quality of the predicted shapes and the model's performance on its distinct tasks. The metrics are categorized based on their purpose.
+
+#### **1.1. Primary Task Metrics (Core Objectives)**
+
+These are the most important metrics and will be the primary measure of the model's success. They will be calculated for both the **Genus** and **Health** segmentation heads.
+
+*   **Mean Intersection over Union (mIoU):** This is the gold standard for semantic segmentation. It measures the overlap between the predicted mask and the ground-truth mask for each class and then averages this score across all classes.
+    *   **Formula:** `IoU = True Positives / (True Positives + False Positives + False Negatives)`
+    *   **Calculation:** We will compute `mIoU_Genus` (averaged over all coral genera classes + background) and `mIoU_Health` (averaged over Healthy, Bleached, Dead + background).
+    *   **Purpose:** To provide a robust measure of overall segmentation accuracy for our core tasks.
+
+*   **Boundary IoU (BIoU):** This advanced metric specifically addresses the "nitid shapes" requirement by focusing on the quality of the predicted boundaries. It is less sensitive to errors in the interior of large objects and more sensitive to the precision of the object's outline.
+    *   **Mechanism:** It creates a thin "boundary band" of a few pixels' width around the edge of the ground-truth and predicted shapes. It then calculates the IoU of these two bands.
+    *   **Calculation:** We will compute `BIoU_Genus` to evaluate how well the model delineates the complex morphological structures of different corals.
+    *   **Purpose:** To quantitatively measure the model's ability to produce clean, accurate, and non-noisy boundaries for our primary tasks. This is a key metric for validating our architectural choices.
+
+*   **Mean Pixel Accuracy (mPA):** This metric calculates the percentage of correctly classified pixels for each class and averages it over all classes. It is simpler than mIoU and provides a complementary view of performance.
+    *   **Purpose:** To offer a straightforward accuracy score, useful for sanity checks and high-level comparison.
+
+#### **1.2. Auxiliary Task Metrics (Diagnostic Tools)**
+
+The performance on these tasks is not an end goal but a diagnostic tool to understand if the model is successfully learning the contextual regularizers.
+
+*   **Class-specific IoU:** For each auxiliary head (`Fish`, `Human-Artifact`, `Substrate`), we will calculate the IoU for the positive class(es) only. For example, `IoU_Fish` will measure the performance on the `Fish` class, not the background.
+    *   **Purpose:** To verify that the auxiliary heads are effectively learning their respective tasks. High performance indicates successful feature disentanglement in the shared encoder. Low performance might suggest the task is too difficult or is not contributing positively to regularization.
+
+#### **1.3. Overall Model Performance Metric (For Model Selection)**
+
+To compare different training runs and select the best model checkpoint, it is useful to have a single, representative score.
+
+*   **Hierarchical Mean (H-Mean):** We define a custom metric that reflects the primacy of our core tasks. It is a simple average of the mIoU scores of the two primary heads.
+    *   **Formula:** `H-Mean = (mIoU_Genus + mIoU_Health) / 2`
+    *   **Purpose:** To serve as the key metric for model selection during the validation phase. The model checkpoint with the highest H-Mean on the validation set will be considered the "best model".
+
+---
+
+### **2. Train, Validation, and Testing Pipeline**
+
+This section details the end-to-end workflow, from training the model to producing the final, reportable results on the test set.
+
+#### **2.1. The Training Pipeline (Model Learning)**
+
+This is the iterative process of learning the model weights from the training data.
+
+1.  **Data Preparation:** The `DataLoader` is configured to sample mini-batches from the **pre-generated pool of patches** created by our Context-Aware Spatial Sampling (PDS) strategy.
+2.  **The Training Loop (for each mini-batch):**
+    a. **Fetch Data:** A mini-batch of image patches and their corresponding stack of ground-truth masks (one mask for each task head) are loaded onto the GPU.
+    b. **Augmentation:** On-the-fly geometric and colorimetric augmentations are applied to the image patches. Geometric augmentations are applied identically to the mask stack.
+    c. **Forward Pass:** The model is in training mode (`model.train()`). The image batch is passed through the network. The model returns a dictionary of output logits, one for each of the task heads (e.g., `outputs = {'genus': logits_g, 'health': logits_h, ...}`).
+    d. **Loss Calculation:** The composite loss function is computed.
+        i. The `L_primary` term is calculated using the outputs and ground truth from the Genus and Health heads, employing the uncertainty-based weighting and the hybrid Focal+Dice loss.
+        ii. The `L_auxiliary` term is calculated as the sum of the Weighted Cross-Entropy losses for the auxiliary heads.
+        iii. The `L_total` is computed by combining the primary and auxiliary losses.
+    e. **Backward Pass:** The gradients are computed with respect to the total loss (`L_total.backward()`).
+    f. **Optimizer Step:** The optimizer updates the model's weights (`optimizer.step()`).
+    g. **Scheduler Step:** The learning rate scheduler updates the learning rate (`scheduler.step()`).
+    h. The gradients are zeroed (`optimizer.zero_grad()`) to prepare for the next iteration.
+
+#### **2.2. The Validation Pipeline (Model Selection)**
+
+This pipeline is run periodically during training (e.g., at the end of every epoch) to monitor performance on a held-out validation set and select the best model.
+
+1.  **Switch to Eval Mode:** The model is set to evaluation mode (`model.eval()`). This disables layers like dropout. All operations are wrapped in a `torch.no_grad()` context to disable gradient computation, saving memory and time.
+2.  **Data Loading:** The `DataLoader` iterates through the validation set patches. **No data augmentation is applied**, except for the standard channel-wise normalization, to ensure a consistent evaluation.
+3.  **Inference:** For each batch, a forward pass is performed to get the output logits for all heads.
+4.  **Metric Calculation:** The predicted logits are converted to class predictions (via `argmax`). These predictions are compared against the ground-truth masks to compute all defined evaluation metrics (mIoU, BIoU for primary tasks; IoU for auxiliary tasks).
+5.  **Model Checkpointing:** The **H-Mean** is calculated. If the current H-Mean is the best seen so far, the model's current state (weights, optimizer state) is saved to a file (e.g., `best_model.pth`). This checkpoint represents the best-performing model discovered during training.
+
+#### **2.3. The Testing Pipeline (Final Evaluation)**
+
+This pipeline is executed **only once** at the very end of the entire training process, using the single best model checkpoint saved during validation. It evaluates the model's final performance on the completely unseen test set.
+
+1.  **Load Best Model:** The weights from the `best_model.pth` checkpoint are loaded into the model architecture. The model is set to evaluation mode (`model.eval()`).
+2.  **Sliding Window Inference on Full Images:** Since the model was trained on patches, we cannot directly run it on the full-resolution test orthomosaics.
+    a. A large test image is systematically tiled into **overlapping patches** of the same size used during training (e.g., 512x512 with a 50% overlap).
+    b. The model performs inference on each patch independently, generating a set of output logits for each head for every patch.
+    c. **Stitching:** The patch-wise predictions are reassembled into a full-sized prediction map. For the overlapping regions, the logits (pre-softmax probabilities) from the different patches are **averaged** to produce a smooth, seamless final prediction. This blending is crucial for eliminating blocky artifacts at patch boundaries.
+3.  **Final Metric Computation:** The final, reassembled segmentation maps are compared against the full-resolution ground-truth test masks. All evaluation metrics (mIoU, BIoU, etc.) are computed on these full maps.
+4.  **Reporting:** These final metrics on the test set are the definitive results of the experiment and are the numbers that will be reported in the final publication.

@@ -1,5 +1,6 @@
+from time import time
 from datasets import load_dataset
-
+import numpy as np
 # 1. Load the dataset from the Hugging Face Hub
 # This creates a DatasetDict object containing all data splits.
 dataset = load_dataset("EPFL-ECEO/coralscapes")
@@ -16,20 +17,13 @@ train_dataset = dataset["train"]
 print("\n--- Train Split Info ---")
 print(train_dataset)
 
-# 4. Access a single example from the training split
-# You can index the dataset to get a specific data point.
-first_example = train_dataset[0]
 print("\n--- First Example from Training Set ---")
-print(first_example)
+first_example = train_dataset[0]
+label_mask = np.array(first_example["label"])  # convert to numpy for inspection
+image = first_example["image"]
+print("Image:", image.size, image.mode)
+print("Label mask shape:", label_mask.shape, "unique values:", np.unique(label_mask))
 
-# 5. Inspect the data
-# The 'image' feature is a PIL Image object, and 'label' is an integer.
-image = first_example['image']
-label = first_example['label']
 
-print(f"\nImage Mode: {image.mode}, Image Size: {image.size}")
-print(f"Label: {label}")
+print(image)
 
-# You can also inspect the class names for the labels
-class_names = train_dataset.features['label'].names
-print(f"The name for label {label} is: '{class_names[label]}'")
