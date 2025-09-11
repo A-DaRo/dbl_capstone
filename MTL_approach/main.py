@@ -8,7 +8,7 @@ from transformers import SegformerFeatureExtractor
 from typing import Tuple
 
 # Assumes model.py is in the same directory
-from MTL_approach.model import CoralMTLSegFormerHuggingFace
+from model import CoralMTLSegFormerHuggingFace
 
 # --- Constants ---
 NUM_GENUS_CLASSES = 15

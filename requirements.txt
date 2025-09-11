@@ -1,4 +1,7 @@
 datasets
 Pillow
 torch
+torchvision
+torchaudio
+--index-url https://download.pytorch.org/whl/cu121
 transformers

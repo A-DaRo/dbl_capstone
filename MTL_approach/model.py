@@ -8,7 +8,7 @@ from typing import Dict
 from transformers import SegformerModel
 
 # Assumes decoder.py is in the same directory
-from MTL_approach.decoder import CoralMTLDecoder
+from decoder import CoralMTLDecoder
 
 class CoralMTLSegFormerHuggingFace(nn.Module):
     """
