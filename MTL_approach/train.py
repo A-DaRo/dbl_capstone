@@ -3,6 +3,7 @@
 import torch
 import numpy as np
 import os
+import math # <--- FIX: Import the math module
 from torch.utils.data import DataLoader
 from datasets import load_dataset
 from collections import defaultdict
@@ -51,11 +52,13 @@ def main():
     print(f"--- Initializing Model ({config.ENCODER_NAME}) on {config.DEVICE} ---")
     model = CoralMTLModel(config.ENCODER_NAME, config.DECODER_CHANNEL, num_classes, config.ATTENTION_DIM).to(config.DEVICE)
     
-    # --- FIX: Move the loss function module to the correct device ---
     loss_fn = CoralMTLLoss(num_classes=num_classes, w_aux=config.W_AUX, w_consistency=config.W_CONSISTENCY,
                            hybrid_alpha=config.HYBRID_ALPHA, focal_gamma=config.FOCAL_GAMMA).to(config.DEVICE)
                            
-    total_training_steps = len(train_loader) // config.GRADIENT_ACCUMULATION_STEPS * config.NUM_EPOCHS
+    # --- FIX: Use math.ceil for robust calculation of training steps ---
+    # This prevents total_training_steps from becoming zero when len(train_loader) < grad_accumulation_steps
+    num_update_steps_per_epoch = math.ceil(len(train_loader) / config.GRADIENT_ACCUMULATION_STEPS)
+    total_training_steps = num_update_steps_per_epoch * config.NUM_EPOCHS
     warmup_steps = int(total_training_steps * config.WARMUP_STEPS_RATIO)
     
     optimizer, scheduler = create_optimizer_and_scheduler(model, learning_rate=config.LEARNING_RATE,
