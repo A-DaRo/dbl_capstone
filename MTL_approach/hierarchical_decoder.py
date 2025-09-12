@@ -85,8 +85,7 @@ class HierarchicalContextAwareDecoder(nn.Module):
                 nn.Conv2d(decoder_channel, attention_dim, 1, bias=False), # Key
                 nn.Conv2d(decoder_channel, attention_dim, 1, bias=False)  # Value
             ])
-            
-        # *** VRAM OPTIMIZATION START ***
+
         # Add a pooling layer to downsample context features. A 4x reduction in spatial
         # dimensions leads to a 16x reduction in sequence length and memory usage.
         self.context_pool = nn.AvgPool2d(kernel_size=4, stride=4)
@@ -96,7 +95,6 @@ class HierarchicalContextAwareDecoder(nn.Module):
         self.attn_proj = nn.ModuleDict({
             task: MLP(attention_dim, decoder_channel) for task in self.primary_tasks
         })
-        # *** VRAM OPTIMIZATION END ***
 
         # --- 4. Final Prediction Layers ---
         # Each task gets a final 1x1 Conv layer to predict its mask.
@@ -123,31 +121,29 @@ class HierarchicalContextAwareDecoder(nn.Module):
         return fused_features
 
 
-    def _perform_cross_attention(self, query_task: str, F: Dict[str, torch.Tensor]) -> torch.Tensor:
+    def _perform_cross_attention(self, query_task: str, decoded_features: Dict[str, torch.Tensor]) -> torch.Tensor:
         """
         Performs attention where a query task attends to context from all other tasks.
 
         Args:
             query_task (str): The name of the task generating the Query (e.g., 'genus').
-            F (Dict[str, torch.Tensor]): Dictionary of feature maps for all tasks.
+            decoded_features (Dict[str, torch.Tensor]): Dictionary of feature maps for all tasks.
 
         Returns:
             torch.Tensor: The context-enriched feature map for the query task.
         """
-        b, _, h, w = F[query_task].shape
+        b, _, h, w = decoded_features[query_task].shape
 
         # 1. Generate Query from the primary task (full resolution)
-        q = self.to_qkv[query_task][0](F[query_task]).flatten(2).transpose(1, 2)  # B, HW, C_attn
+        q = self.to_qkv[query_task][0](decoded_features[query_task]).flatten(2).transpose(1, 2)  # B, HW, C_attn
 
         # 2. Generate and concatenate context Keys and Values (downsampled)
         context_keys = []
         context_values = []
         for task in self.tasks:
             if task != query_task:
-                # *** VRAM OPTIMIZATION ***
-                # Downsample the context feature map before generating K and V
-                # to drastically reduce the sequence length.
-                context_feature = self.context_pool(F[task])
+                # Downsample the context feature map to drastically reduce sequence length.
+                context_feature = self.context_pool(decoded_features[task])
 
                 k_task = self.to_qkv[task][1](context_feature).flatten(2).transpose(1, 2) # Shape: B, HW/16, C_attn
                 v_task = self.to_qkv[task][2](context_feature).flatten(2).transpose(1, 2) # Shape: B, HW/16, C_attn
@@ -159,6 +155,7 @@ class HierarchicalContextAwareDecoder(nn.Module):
         v_context = torch.cat(context_values, dim=1) # Shape: B, (4*HW/16), C_attn
 
         # 3. Compute Attention
+        # This will now work correctly because `F` refers to torch.nn.functional
         out = F.scaled_dot_product_attention(q, k_context, v_context)
 
         # Reshape back to image format
@@ -183,7 +180,7 @@ class HierarchicalContextAwareDecoder(nn.Module):
         fused_features = self._fuse_encoder_features(features)
 
         # --- Operation 1: Multi-Stream Branching and Asymmetric Decoding ---
-        # Generate initial feature maps (F_task) for all 5 tasks
+        # Generate initial feature maps for all 5 tasks
         decoded_features = {task: decoder(fused_features) for task, decoder in self.decoders.items()}
 
         # --- Operation 2: The Expanded Multi-Task Cross-Attention Module ---
@@ -197,7 +194,6 @@ class HierarchicalContextAwareDecoder(nn.Module):
 
         # Primary tasks use enriched features with a residual connection
         for task in self.primary_tasks:
-            # *** ARCHITECTURE FIX START ***
             # Project the attention output back to the decoder's channel dimension
             projected_enrichment = self.attn_proj[task](enriched_features[task])
             
@@ -206,7 +202,6 @@ class HierarchicalContextAwareDecoder(nn.Module):
             
             # Predict logits from the final combined feature
             logits[task] = self.predictors[task](final_feature)
-            # *** ARCHITECTURE FIX END ***
 
         # Auxiliary tasks predict directly from their lightweight heads
         for task in self.aux_tasks:
