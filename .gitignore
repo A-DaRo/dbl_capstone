@@ -1,6 +1,10 @@
 # project specific ignores
 seaview/
 models/
+dataset/
+
+# Byte-compiled / optimized / DLL files
+*.pth
 
 
 # Byte-compiled / optimized / DLL files

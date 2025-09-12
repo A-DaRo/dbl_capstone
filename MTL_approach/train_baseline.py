@@ -59,7 +59,7 @@ class ConfigBaseline:
     # --- Training ---
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
     SEED = 42
-    OUTPUT_DIR = "training_outputs_baseline"
+    OUTPUT_DIR = "training_outputs/baseline"
     BEST_MODEL_NAME = "best_baseline_model.pth"
     DEBUG = False
 
@@ -250,7 +250,7 @@ def main():
     
     optimizer, scheduler = create_optimizer_and_scheduler(model, config.LEARNING_RATE, config.WEIGHT_DECAY, config.ADAM_BETAS, total_steps, warmup_steps)
     
-    scaler = torch.cuda.amp.GradScaler()
+    scaler = torch.amp.GradScaler()
     metrics_calculator = SingleTaskMetrics(config.NUM_CLASSES, config.DEVICE)
     
     best_miou = -1.0
