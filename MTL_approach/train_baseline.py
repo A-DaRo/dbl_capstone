@@ -151,10 +151,18 @@ def train_one_epoch_baseline(model, dataloader, optimizer, scheduler, loss_fn, s
     for i, batch in loop:
         images, masks = batch['image'].to(device, non_blocking=True), batch['mask'].to(device, non_blocking=True)
         with torch.amp.autocast(device_type=str(device), dtype=torch.float16):
-            # --- FIX: Access the .logits attribute from the model output ---
             outputs = model(pixel_values=images)
-            loss = loss_fn(outputs.logits, masks) / grad_accumulation_steps
-            # ----------------------------------------------------------------
+            
+            # --- FIX: Upsample logits to match the mask size ---
+            upsampled_logits = F.interpolate(
+                outputs.logits,
+                size=masks.shape[-2:], # (H, W) of the mask
+                mode='bilinear',
+                align_corners=False
+            )
+            loss = loss_fn(upsampled_logits, masks) / grad_accumulation_steps
+            # ---------------------------------------------------
+
         scaler.scale(loss).backward()
         if (i + 1) % grad_accumulation_steps == 0 or (i + 1) == len(dataloader):
             scaler.step(optimizer)
@@ -173,11 +181,19 @@ def validate_one_epoch_baseline(model, dataloader, loss_fn, metrics_calculator, 
         for batch in loop:
             images, masks = batch['image'].to(device, non_blocking=True), batch['mask'].to(device, non_blocking=True)
             with torch.amp.autocast(device_type=str(device), dtype=torch.float16):
-                # --- FIX: Run forward pass once and access .logits for both loss and metrics ---
                 outputs = model(pixel_values=images)
-                total_val_loss += loss_fn(outputs.logits, masks).item()
-                metrics_calculator.update(outputs.logits, masks)
-                # -----------------------------------------------------------------------------
+
+                # --- FIX: Upsample logits for both loss and metrics ---
+                upsampled_logits = F.interpolate(
+                    outputs.logits,
+                    size=masks.shape[-2:],
+                    mode='bilinear',
+                    align_corners=False
+                )
+                total_val_loss += loss_fn(upsampled_logits, masks).item()
+                metrics_calculator.update(upsampled_logits, masks)
+                # ------------------------------------------------------
+                
     return total_val_loss / len(dataloader)
 
 
@@ -303,19 +319,24 @@ def main():
         batch = next(iter(val_loader))
         images = batch['image'].to(config.DEVICE)
         gt_masks = batch['mask']
-        # --- FIX: Access .logits here as well ---
-        pred_logits = model(pixel_values=images).logits
-        # ------------------------------------------
+        with torch.amp.autocast(device_type=str(config.DEVICE), dtype=torch.float16):
+            outputs = model(pixel_values=images)
+            # --- FIX: Upsample logits for qualitative visualization ---
+            pred_logits = F.interpolate(
+                outputs.logits,
+                size=gt_masks.shape[-2:],
+                mode='bilinear',
+                align_corners=False
+            )
+            # --------------------------------------------------------
         pred_masks = torch.argmax(pred_logits, dim=1)
 
-        # reporting.plot_qualitative_grid expects dicts, so we adapt
         reporting.plot_qualitative_grid(
             images.cpu(), 
             {'Ground Truth': gt_masks}, 
             {'Prediction': pred_masks.cpu()},
             save_path=f"{config.OUTPUT_DIR}/baseline_qualitative_grid.png"
         )
-
 
 if __name__ == "__main__":
     # The plotting section is now updated with plt.close() to reflect this.
