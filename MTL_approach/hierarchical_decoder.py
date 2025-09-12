@@ -47,7 +47,6 @@ class HierarchicalContextAwareDecoder(nn.Module):
         self.primary_tasks = ['genus', 'health']
         self.aux_tasks = ['fish', 'human_artifacts', 'substrate']
         self.decoder_channel = decoder_channel
-        self.scale = attention_dim ** -0.5
 
         # --- 1. Channel Unification MLPs ---
         # Projects encoder features from each stage to the same `decoder_channel` dimension.
@@ -86,8 +85,11 @@ class HierarchicalContextAwareDecoder(nn.Module):
                 nn.Conv2d(decoder_channel, attention_dim, 1, bias=False), # Key
                 nn.Conv2d(decoder_channel, attention_dim, 1, bias=False)  # Value
             ])
-            
-        self.softmax = nn.Softmax(dim=-1)
+        
+        # *** FIX 2: Add projection layer to map attention output back to decoder_channel for residual connection ***
+        self.to_out = nn.ModuleDict({
+            task: nn.Conv2d(attention_dim, decoder_channel, 1) for task in self.primary_tasks
+        })
 
         # --- 4. Final Prediction Layers ---
         # Each task gets a final 1x1 Conv layer to predict its mask.
@@ -114,44 +116,44 @@ class HierarchicalContextAwareDecoder(nn.Module):
         return fused_features
 
 
-    def _perform_cross_attention(self, query_task: str, F: Dict[str, torch.Tensor]) -> torch.Tensor:
+    # *** FIX 1: Rename parameter `F` to `decoded_features` to avoid shadowing ***
+    def _perform_cross_attention(self, query_task: str, decoded_features: Dict[str, torch.Tensor]) -> torch.Tensor:
         """
         Performs attention where a query task attends to context from all other tasks.
 
         Args:
             query_task (str): The name of the task generating the Query (e.g., 'genus').
-            F (Dict[str, torch.Tensor]): Dictionary of feature maps for all tasks.
+            decoded_features (Dict[str, torch.Tensor]): Dictionary of feature maps for all tasks.
 
         Returns:
             torch.Tensor: The context-enriched feature map for the query task.
         """
-        b, _, h, w = F[query_task].shape
+        b, _, h, w = decoded_features[query_task].shape
         
         # 1. Generate Query from the primary task
-        q = self.to_qkv[query_task][0](F[query_task]).flatten(2).transpose(1, 2)  # B, HW, C_attn
+        q = self.to_qkv[query_task][0](decoded_features[query_task]).flatten(2).transpose(1, 2)  # B, HW, C_attn
 
         # 2. Generate and concatenate context Keys and Values
         context_keys = []
         context_values = []
         for task in self.tasks:
             if task != query_task:
-                # *** FIX START ***
-                # Reshape each key and value BEFORE concatenating
-                k_task = self.to_qkv[task][1](F[task]).flatten(2).transpose(1, 2) # Shape: B, HW, C_attn
-                v_task = self.to_qkv[task][2](F[task]).flatten(2).transpose(1, 2) # Shape: B, HW, C_attn
+                k_task = self.to_qkv[task][1](decoded_features[task]).flatten(2).transpose(1, 2) # Shape: B, HW, C_attn
+                v_task = self.to_qkv[task][2](decoded_features[task]).flatten(2).transpose(1, 2) # Shape: B, HW, C_attn
                 context_keys.append(k_task)
                 context_values.append(v_task)
         
-        # Concatenate along the sequence dimension (dim=1)
         k_context = torch.cat(context_keys, dim=1) # Shape: B, (4*HW), C_attn
         v_context = torch.cat(context_values, dim=1) # Shape: B, (4*HW), C_attn
-        # *** FIX END ***
 
-        # 3. Compute Attention
-        # q: (B, HW, C_attn) @ k_context.T: (B, C_attn, 4*HW) -> attn: (B, HW, 4*HW)
+        # 3. Compute Attention - This now correctly uses `torch.nn.functional`
         out = F.scaled_dot_product_attention(q, k_context, v_context)
         
-        out = out.transpose(1, 2).reshape(b, -1, h, w) # Reshape back to B, C_attn, H, W
+        # Reshape back to B, C_attn, H, W
+        out = out.transpose(1, 2).reshape(b, -1, h, w) 
+        
+        # *** FIX 2 (continued): Project back to decoder_channel for residual connection ***
+        out = self.to_out[query_task](out)
         
         return out
 
@@ -172,36 +174,32 @@ class HierarchicalContextAwareDecoder(nn.Module):
         fused_features = self._fuse_encoder_features(features)
         
         # --- Operation 1: Multi-Stream Branching and Asymmetric Decoding ---
-        # Generate initial feature maps (F_task) for all 5 tasks
-        F = {task: decoder(fused_features) for task, decoder in self.decoders.items()}
+        # Generate initial feature maps for all 5 tasks
+        # *** FIX 1 (continued): Rename variable to `decoded_features` ***
+        decoded_features = {task: decoder(fused_features) for task, decoder in self.decoders.items()}
 
         # --- Operation 2: The Expanded Multi-Task Cross-Attention Module ---
         # Primary tasks query the context provided by all other tasks.
         enriched_features = {}
         for task in self.primary_tasks:
-            enriched_features[task] = self._perform_cross_attention(task, F)
+            enriched_features[task] = self._perform_cross_attention(task, decoded_features)
 
         # --- Operation 3: Final Predictions (Hierarchical Output) ---
         logits = {}
         
+        # *** FIX 3: Correctly implement residual connection and prediction ***
         # Primary tasks use enriched features with a residual connection
         for task in self.primary_tasks:
-            # The residual connection now happens between the enriched features (output of attention)
-            # and the input to the attention projectors.
-            initial_features_for_enrichment = F[task]
-            # We need to ensure dimensions match for residual connection if attention_dim != decoder_channel
-            # For simplicity, let's assume predictors for primary tasks now take attention_dim
-            # This is a slight change from the original design but is more consistent with attention outputs
-            final_feature = initial_features_for_enrichment + self.to_qkv[task][2](initial_features_for_enrichment).view_as(enriched_features[task]) # A simplified way to add back Value
-            final_feature = enriched_features[task] # Or simply use the enriched features directly
+            initial_feature = decoded_features[task]
+            enriched_feature = enriched_features[task]
+            final_feature = initial_feature + enriched_feature # Residual connection
             logits[task] = self.predictors[task](final_feature)
             
         # Auxiliary tasks predict directly from their lightweight heads
         for task in self.aux_tasks:
-            logits[task] = self.predictors[task](F[task])
+            logits[task] = self.predictors[task](decoded_features[task])
 
-        # Upsample all logits to H/4 x W/4 before returning
-        # Note: final upsampling to original image size should be done outside or after loss calculation
+        # Upsample all logits before returning
         target_size = features[0].shape[2:]
         for task, logit in logits.items():
             logits[task] = F.interpolate(logit, size=target_size, mode='bilinear', align_corners=False)
