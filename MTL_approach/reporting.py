@@ -20,7 +20,7 @@ def plot_primary_performance(val_history: Dict[str, List[float]], save_path: str
     h_mean = val_history.get('H-Mean', [])
     miou_genus = val_history.get('mIoU_genus', [])
     miou_health = val_history.get('mIoU_health', [])
-    
+
     best_epoch = np.argmax(h_mean) + 1
     best_score = np.max(h_mean)
 
@@ -29,15 +29,15 @@ def plot_primary_performance(val_history: Dict[str, List[float]], save_path: str
     ax.plot(epochs, h_mean, label=f'H-Mean (Best: {best_score:.4f})', color='b', linewidth=2.5, marker='o')
     ax.plot(epochs, miou_genus, label='mIoU Genus', color='g', linestyle='--')
     ax.plot(epochs, miou_health, label='mIoU Health', color='orange', linestyle='--')
-    
+
     ax.axvline(x=best_epoch, color='r', linestyle=':', label=f'Best Epoch: {best_epoch}')
-    
+
     ax.set_title('Primary Task Performance on Validation Set', fontsize=16)
     ax.set_xlabel('Epoch', fontsize=12)
     ax.set_ylabel('mIoU / H-Mean', fontsize=12)
     ax.legend(fontsize=10)
     ax.set_ylim(bottom=0)
-    
+
     if save_path:
         plt.savefig(save_path)
     plt.show()
@@ -46,18 +46,17 @@ def plot_per_class_iou_bar_chart(class_iou: Dict[str, float], task_name: str, sa
     """Generates a bar chart of IoU for each class of a given task."""
     class_names = list(class_iou.keys())
     iou_scores = [class_iou[name] for name in class_names]
-    
+
     plt.style.use('seaborn-v0_8-whitegrid')
     fig, ax = plt.subplots(figsize=(14, 8))
     bars = ax.bar(class_names, iou_scores, color=plt.cm.viridis(np.linspace(0, 1, len(class_names))))
-    
+
     ax.set_title(f'Per-Class IoU for {task_name.title()} Task', fontsize=16)
     ax.set_xlabel('Class Name', fontsize=12)
     ax.set_ylabel('Intersection over Union (IoU)', fontsize=12)
     ax.set_ylim(0, 1.0)
     plt.xticks(rotation=45, ha='right')
-    
-    # Add IoU values on top of bars
+
     for bar in bars:
         yval = bar.get_height()
         plt.text(bar.get_x() + bar.get_width()/2.0, yval + 0.01, f'{yval:.2f}', ha='center', va='bottom')
@@ -69,50 +68,71 @@ def plot_per_class_iou_bar_chart(class_iou: Dict[str, float], task_name: str, sa
 
 def plot_confusion_matrix(cm: np.ndarray, class_names: List[str], task_name: str, save_path: str = None):
     """Plots a normalized confusion matrix heatmap."""
-    # Normalize by row (recall)
-    cm_normalized = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-    
+    # --- FIX 1: Handle division by zero for classes not present in the validation set ---
+    # We use a context manager to suppress the warning and np.nan_to_num to replace NaNs with 0.
+    with np.errstate(divide='ignore', invalid='ignore'):
+        row_sums = cm.sum(axis=1)[:, np.newaxis]
+        cm_normalized = np.nan_to_num(cm.astype('float') / row_sums)
+
     fig, ax = plt.subplots(figsize=(12, 10))
     sns.heatmap(cm_normalized, annot=True, fmt='.2f', cmap='Blues',
                 xticklabels=class_names, yticklabels=class_names, ax=ax)
-    
+
     ax.set_title(f'Normalized Confusion Matrix for {task_name.title()} Task', fontsize=16)
     ax.set_xlabel('Predicted Label', fontsize=12)
     ax.set_ylabel('True Label', fontsize=12)
     plt.xticks(rotation=45, ha='right')
     plt.yticks(rotation=0)
     plt.tight_layout()
-    
+
     if save_path:
         plt.savefig(save_path)
     plt.show()
 
 def plot_qualitative_grid(images: torch.Tensor, gt_masks: Dict[str, torch.Tensor], pred_masks: Dict[str, torch.Tensor], save_path: str = None):
-    """Generates a grid comparing input images, ground truths, and predictions."""
+    """
+    --- FIX 2: A flexible grid that adapts to the provided tasks ---
+    Generates a grid comparing input images, ground truths, and predictions.
+    It now dynamically determines the number of rows based on the keys in the mask dictionaries.
+    """
     num_samples = images.shape[0]
-    fig, axes = plt.subplots(5, num_samples, figsize=(4 * num_samples, 20))
-    if num_samples == 1: # Make axes 2D for consistent indexing
-        axes = np.expand_dims(axes, axis=1)
+    tasks = list(gt_masks.keys())  # Dynamically get task names from the dictionary keys
+    num_tasks = len(tasks)
 
-    row_titles = ['Input Image', 'GT Genus', 'Pred Genus', 'GT Health', 'Pred Health']
-    
+    # 1 row for the input image, plus 2 rows for each task (GT and Prediction)
+    num_rows = 1 + (num_tasks * 2)
+
+    fig, axes = plt.subplots(num_rows, num_samples, figsize=(4 * num_samples, 4 * num_rows), squeeze=False)
+
+    # --- Row 0: Input Images ---
     for i in range(num_samples):
-        # Input Image
         axes[0, i].imshow(denormalize(images[i]))
         axes[0, i].set_title(f'Sample {i+1}', fontsize=14)
-        
-        # Masks
-        axes[1, i].imshow(gt_masks['genus'][i], cmap='tab20')
-        axes[2, i].imshow(pred_masks['genus'][i], cmap='tab20')
-        axes[3, i].imshow(gt_masks['health'][i], cmap='viridis')
-        axes[4, i].imshow(pred_masks['health'][i], cmap='viridis')
+    axes[0, 0].set_ylabel('Input Image', fontsize=14) # Label only the first column
 
-        # Formatting
-        for j in range(5):
-            axes[j, i].set_xticks([])
-            axes[j, i].set_yticks([])
-            if i == 0:
-                axes[j, i].set_ylabel(row_titles[j], fontsize=14)
+    # --- Subsequent Rows: GT and Predictions for each task ---
+    for task_idx, task_name in enumerate(tasks):
+        gt_row = 1 + (task_idx * 2)
+        pred_row = 2 + (task_idx * 2)
+        
+        # Use different colormaps for visual distinction between tasks
+        cmap = 'viridis' if task_idx % 2 == 0 else 'inferno'
+
+        for i in range(num_samples):
+            # Plot Ground Truth
+            axes[gt_row, i].imshow(gt_masks[task_name][i], cmap=cmap)
+            # Plot Prediction
+            axes[pred_row, i].imshow(pred_masks[task_name][i], cmap=cmap)
+
+        # Set row labels
+        axes[gt_row, 0].set_ylabel(f'GT {task_name}', fontsize=14)
+        axes[pred_row, 0].set_ylabel(f'Pred {task_name}', fontsize=14)
+
+    # General formatting for all axes
+    for r in range(num_rows):
+        for c in range(num_samples):
+            axes[r, c].set_xticks([])
+            axes[r, c].set_yticks([])
 
     plt.tight_layout()
     if save_path:
@@ -131,6 +151,7 @@ def print_results_table(results: Dict[str, Dict[str, float]]):
         miou_h = f"{metrics.get('mIoU_health', 0) * 100:.2f}%"
         h_mean = f"{metrics.get('H-Mean', 0) * 100:.2f}%"
         print(f"{model_name:<20} | {miou_g:<12} | {biou_g:<12} | {miou_h:<12} | {h_mean:<10}")
+
 
 if __name__ == '__main__':
     print("--- Running Demo of Reporting Plots & Tables ---")

@@ -43,9 +43,11 @@ class HierarchicalContextAwareDecoder(nn.Module):
         """
         super().__init__()
         assert len(encoder_channels) == 4, "Requires features from 4 encoder stages."
-        self.tasks = ['genus', 'health', 'fish', 'human_artifacts', 'substrate']
-        self.primary_tasks = ['genus', 'health']
+
+        self.primary_tasks = ['panoptic_shape', 'panoptic_health']
         self.aux_tasks = ['fish', 'human_artifacts', 'substrate']
+        self.tasks = self.primary_tasks + self.aux_tasks
+        
         self.decoder_channel = decoder_channel
 
         # --- 1. Channel Unification MLPs ---
@@ -59,7 +61,7 @@ class HierarchicalContextAwareDecoder(nn.Module):
 
         # --- 2. Asymmetric Decoder Heads ---
         # Primary tasks get a full MLP decoder block
-        self.genus_decoder = MLP(fused_channels, decoder_channel)
+        self.shape_decoder  = MLP(fused_channels, decoder_channel)
         self.health_decoder = MLP(fused_channels, decoder_channel)
 
         # Auxiliary tasks get lightweight 1x1 Conv heads (simpler than a full MLP block)
@@ -69,8 +71,8 @@ class HierarchicalContextAwareDecoder(nn.Module):
 
         # Store heads in a ModuleDict for easy access
         self.decoders = nn.ModuleDict({
-            'genus': self.genus_decoder,
-            'health': self.health_decoder,
+            'panoptic_shape': self.shape_decoder ,
+            'panoptic_health': self.health_decoder,
             'fish': self.fish_head,
             'human_artifacts': self.human_artifacts_head,
             'substrate': self.substrate_head
@@ -94,6 +96,14 @@ class HierarchicalContextAwareDecoder(nn.Module):
         # for the residual connection. This fixes a channel mismatch bug.
         self.attn_proj = nn.ModuleDict({
             task: MLP(attention_dim, decoder_channel) for task in self.primary_tasks
+        })
+
+        # Gating layers for flexible feature fusion in primary tasks
+        self.gating_layers = nn.ModuleDict({
+            task: nn.Sequential(
+                nn.Conv2d(decoder_channel, 1, kernel_size=1),
+                nn.Sigmoid()
+            ) for task in self.primary_tasks
         })
 
         # --- 4. Final Prediction Layers ---
@@ -194,11 +204,16 @@ class HierarchicalContextAwareDecoder(nn.Module):
 
         # Primary tasks use enriched features with a residual connection
         for task in self.primary_tasks:
-            # Project the attention output back to the decoder's channel dimension
-            projected_enrichment = self.attn_proj[task](enriched_features[task])
             
-            # Add the residual connection
-            final_feature = decoded_features[task] + projected_enrichment
+            f_original = decoded_features[task]
+            # Project the attention output back to the decoder's channel dimension
+            f_projected_enrichment = self.attn_proj[task](enriched_features[task])
+            
+            # generate gate from the original task-specific feature
+            gate = self.gating_layers[task](f_original) # Shape: B, 1, H, W
+
+            # Apply the gate to the projected enrichment
+            final_feature = (gate * f_original) + ((1 - gate) * f_projected_enrichment)
             
             # Predict logits from the final combined feature
             logits[task] = self.predictors[task](final_feature)

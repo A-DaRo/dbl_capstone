@@ -41,7 +41,7 @@ class ConfigBaseline:
     PATCH_SIZE = 512
 
     # --- Model Architecture ---
-    ENCODER_NAME = "nvidia/mit-b5"
+    ENCODER_NAME = "nvidia/mit-b2"
     DECODER_CHANNEL = 768
     NUM_CLASSES = 39 + 1 # 39 classes + 1 'unlabeled' class
 

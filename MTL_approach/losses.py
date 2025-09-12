@@ -103,7 +103,6 @@ class CoralMTLLoss(nn.Module):
     def __init__(self,
                  num_classes: Dict[str, int],
                  class_weights: Optional[Dict[str, torch.Tensor]] = None,
-                 w_aux: float = 0.4,
                  w_consistency: float = 0.2,
                  hybrid_alpha: float = 0.5,
                  focal_gamma: float = 2.0):
@@ -111,7 +110,6 @@ class CoralMTLLoss(nn.Module):
         
         self.num_classes = num_classes
         self.class_weights = class_weights if class_weights is not None else {}
-        self.w_aux = w_aux
         self.w_consistency = w_consistency
         self.hybrid_alpha = hybrid_alpha
         
@@ -132,6 +130,7 @@ class CoralMTLLoss(nn.Module):
         # Learning log(sigma^2) is more numerically stable than learning sigma directly.
         self.log_var_genus = nn.Parameter(torch.zeros(1), requires_grad=True)
         self.log_var_health = nn.Parameter(torch.zeros(1), requires_grad=True)
+        self.log_var_aux_group = nn.Parameter(torch.zeros(1), requires_grad=True)
 
     def _hybrid_loss(self, logits, targets, task_name):
         """Calculates L_task = α * L_Focal + (1-α) * L_Dice"""
@@ -175,7 +174,7 @@ class CoralMTLLoss(nn.Module):
             task: self.aux_losses[task](predictions[task], targets[task].long())
             for task in self.aux_tasks
         }
-        loss_auxiliary = sum(loss_aux_dict.values())
+        loss_auxiliary_sum = sum(loss_aux_dict.values())
         
         # --- 3. Calculate Primary Loss with Uncertainty Weighting ---
         # Formula: L_primary = (1/σ_g²) * L_g + (1/σ_h²) * L_h + log(σ_g * σ_h)
@@ -186,11 +185,14 @@ class CoralMTLLoss(nn.Module):
         loss_primary = (precision_genus * loss_genus + self.log_var_genus) + \
                        (precision_health * loss_health + self.log_var_health)
         
+        precision_aux_group = torch.exp(-self.log_var_aux_group)
+        loss_auxiliary = precision_aux_group * loss_auxiliary_sum + self.log_var_aux_group
+
         # --- 4. Calculate Consistency Loss ---
         loss_consistency = self._consistency_loss(predictions['genus'], predictions['health'])
         
         # --- 5. Calculate Total Loss ---
-        total_loss = loss_primary + self.w_aux * loss_auxiliary + self.w_consistency * loss_consistency
+        total_loss = loss_primary + loss_auxiliary + self.w_consistency * loss_consistency
 
         # --- Return dictionary of all loss components for logging ---
         loss_dict = {
