@@ -203,6 +203,11 @@ def main():
                 config.ENCODER_NAME, id2label={i:i for i in range(0, config.NUM_CLASSES)}, 
                 semantic_loss_ignore_index = 0, ignore_mismatched_sizes=True
             )
+    
+    # === Move the model to the target device ===
+    model.to(config.DEVICE)
+    # ===============================================
+
     loss_fn = CoralLoss().to(config.DEVICE)
 
     num_steps_per_epoch = math.ceil(len(train_loader) / config.GRADIENT_ACCUMULATION_STEPS)
@@ -253,7 +258,7 @@ def main():
     plt.title('Training Loss per Step')
     plt.xlabel('Training Steps'); plt.ylabel('Loss'); plt.yscale('log'); plt.legend(); plt.grid(True)
     plt.savefig(f"{config.OUTPUT_DIR}/baseline_train_loss.png")
-    plt.show()
+    plt.close() # Added to prevent showing plots in non-interactive environments
 
     # 2. Load best model for final evaluation
     best_model_path = os.path.join(config.OUTPUT_DIR, config.BEST_MODEL_NAME)
@@ -268,7 +273,7 @@ def main():
     plt.axvline(x=best_epoch_idx + 1, color='r', linestyle='--', label=f'Best Epoch: {best_epoch_idx+1}')
     plt.title('Baseline Validation mIoU per Epoch'); plt.xlabel('Epoch'); plt.ylabel('mIoU'); plt.legend(); plt.grid(True)
     plt.savefig(f"{config.OUTPUT_DIR}/baseline_miou_vs_epoch.png")
-    plt.show()
+    plt.close() # Added to prevent showing plots
 
     # Run one final validation pass to get metrics from the best model
     final_metrics_calc = SingleTaskMetrics(config.NUM_CLASSES, config.DEVICE)
@@ -292,7 +297,10 @@ def main():
         batch = next(iter(val_loader))
         images = batch['image'].to(config.DEVICE)
         gt_masks = batch['mask']
-        pred_logits = model(images)
+        # The model call inside validate_one_epoch_baseline also uses autocast, but for clarity and consistency, 
+        # let's wrap this single inference call in it too.
+        with torch.amp.autocast(device_type=str(config.DEVICE), dtype=torch.float16):
+            pred_logits = model(images)
         pred_masks = torch.argmax(pred_logits, dim=1)
 
         # reporting.plot_qualitative_grid expects dicts, so we adapt
@@ -304,4 +312,6 @@ def main():
         )
 
 if __name__ == "__main__":
+    # The plotting section is now updated with plt.close() to reflect this.
+    # The user can uncomment plt.show() if running interactively.
     main()
