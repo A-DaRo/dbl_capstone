@@ -3,7 +3,7 @@
 import torch
 from tqdm import tqdm
 
-def train_one_epoch(model, dataloader, optimizer, scheduler, loss_fn, scaler, device, log_history):
+def train_one_epoch(model, dataloader, optimizer, scheduler, loss_fn, scaler, device, grad_accumulation_steps, log_history):
     """
     Executes a single training epoch according to the specified workflow.
     Handles forward pass, loss calculation, backpropagation, and metric logging.
@@ -16,7 +16,7 @@ def train_one_epoch(model, dataloader, optimizer, scheduler, loss_fn, scaler, de
         masks = {k: v.to(device, non_blocking=True) for k, v in batch['masks'].items()}
 
         # 1. Forward Pass with Automatic Mixed Precision (AMP)
-        with torch.cuda.amp.autocast():
+        with torch.amp.autocast(device_type=str(device), dtype=torch.float16):
             predictions = model(images)
             loss_dict = loss_fn(predictions, masks)
             total_loss = loss_dict['total_loss']
@@ -24,12 +24,14 @@ def train_one_epoch(model, dataloader, optimizer, scheduler, loss_fn, scaler, de
         # 2. Backpropagation using GradScaler to prevent underflow
         optimizer.zero_grad()
         scaler.scale(total_loss).backward()
-        scaler.step(optimizer)
-        scaler.update()
-        
-        # 3. Update Learning Rate Scheduler
-        scheduler.step()
 
+        # --- GRADIENT ACCUMULATION LOGIC ---
+        if (i + 1) % grad_accumulation_steps == 0 or (i + 1) == len(dataloader):
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad()
+            scheduler.step()
+        # --- END LOGIC ---
         # 4. Log batch-level metrics for live monitoring
         log_history['total_loss'].append(total_loss.item())
         log_history['primary_loss'].append(loss_dict['primary_loss'].item())
@@ -57,7 +59,7 @@ def validate_one_epoch(model, dataloader, loss_fn, metrics_calculator, device):
             masks = {k: v.to(device, non_blocking=True) for k, v in batch['masks'].items()}
 
             # Forward pass in inference mode
-            with torch.cuda.amp.autocast():
+            with torch.amp.autocast(device_type=str(device), dtype=torch.float16):
                 predictions = model(images)
                 loss_dict = loss_fn(predictions, masks)
                 total_val_loss += loss_dict['total_loss'].item()

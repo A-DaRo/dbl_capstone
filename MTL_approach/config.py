@@ -6,6 +6,7 @@ class Config:
     """A single class to hold all training configuration."""
     # --- Dataset and DataLoader ---
     BATCH_SIZE = 8
+    GRADIENT_ACCUMULATION_STEPS = 4
     NUM_WORKERS = 4
     PIN_MEMORY = True
     PATCH_SIZE = 512

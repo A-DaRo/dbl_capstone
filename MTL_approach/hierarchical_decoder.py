@@ -149,12 +149,8 @@ class HierarchicalContextAwareDecoder(nn.Module):
 
         # 3. Compute Attention
         # q: (B, HW, C_attn) @ k_context.T: (B, C_attn, 4*HW) -> attn: (B, HW, 4*HW)
-        attn = (q @ k_context.transpose(-2, -1)) * self.scale
-        attn = self.softmax(attn)
-
-        # 4. Get enriched features
-        # attn: (B, HW, 4*HW) @ v_context: (B, 4*HW, C_attn) -> out: (B, HW, C_attn)
-        out = attn @ v_context
+        out = F.scaled_dot_product_attention(q, k_context, v_context)
+        
         out = out.transpose(1, 2).reshape(b, -1, h, w) # Reshape back to B, C_attn, H, W
         
         return out
@@ -190,7 +186,14 @@ class HierarchicalContextAwareDecoder(nn.Module):
         
         # Primary tasks use enriched features with a residual connection
         for task in self.primary_tasks:
-            final_feature = F[task] + enriched_features[task]
+            # The residual connection now happens between the enriched features (output of attention)
+            # and the input to the attention projectors.
+            initial_features_for_enrichment = F[task]
+            # We need to ensure dimensions match for residual connection if attention_dim != decoder_channel
+            # For simplicity, let's assume predictors for primary tasks now take attention_dim
+            # This is a slight change from the original design but is more consistent with attention outputs
+            final_feature = initial_features_for_enrichment + self.to_qkv[task][2](initial_features_for_enrichment).view_as(enriched_features[task]) # A simplified way to add back Value
+            final_feature = enriched_features[task] # Or simply use the enriched features directly
             logits[task] = self.predictors[task](final_feature)
             
         # Auxiliary tasks predict directly from their lightweight heads

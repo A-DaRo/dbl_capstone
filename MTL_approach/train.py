@@ -76,7 +76,8 @@ def main():
         print(f"\n===== Epoch {epoch+1}/{config.NUM_EPOCHS} =====")
         
         # Train one epoch
-        train_one_epoch(model, train_loader, optimizer, scheduler, loss_fn, scaler, config.DEVICE, training_log_history)
+        train_one_epoch(model, train_loader, optimizer, scheduler, loss_fn, scaler, config.DEVICE,
+                        config.GRADIENT_ACCUMULATION_STEPS, training_log_history)
         
         # Validate one epoch
         avg_val_loss = validate_one_epoch(model, val_loader, loss_fn, metrics_calculator, config.DEVICE)
