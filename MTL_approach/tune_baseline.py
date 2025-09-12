@@ -36,7 +36,7 @@ optuna.logging.set_verbosity(optuna.logging.WARNING)
 class TuneConfigAdvanced(ConfigBaseline):
     """Mutable configuration for the advanced Optuna trials."""
     # Increased batch size, removed gradient accumulation
-    BATCH_SIZE = 32
+    BATCH_SIZE = 16
     # GRADIENT_ACCUMULATION_STEPS removed
 
     # Placeholders for tunable augmentation parameters

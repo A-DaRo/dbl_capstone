@@ -43,7 +43,7 @@ class CoralLoss(nn.Module):
                 ignore_index=ignore_index
             )
         elif primary_loss_type == 'cross_entropy':
-            self.primary_loss = smp.losses.CrossEntropyLoss(
+            self.primary_loss = nn.CrossEntropyLoss(
                 weight=class_weights,
                 ignore_index=ignore_index
             )
@@ -103,9 +103,9 @@ class CoralMTLLoss(nn.Module):
         # Auxiliary tasks use standard weighted Cross-Entropy
         class_weights = class_weights if class_weights is not None else {}
         self.aux_losses = nn.ModuleDict({
-            task: smp.losses.CrossEntropyLoss(
+            task: nn.CrossEntropyLoss(
                 weight=class_weights.get(task),
-                ignore_index=self.ignore_index # Propagate ignore_index
+                ignore_index=self.ignore_index
             )
             for task in self.aux_tasks
         })
