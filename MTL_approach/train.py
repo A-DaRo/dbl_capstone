@@ -3,7 +3,7 @@
 import torch
 import numpy as np
 import os
-import math # <--- FIX: Import the math module
+import math
 from torch.utils.data import DataLoader
 from datasets import load_dataset
 from collections import defaultdict
@@ -38,8 +38,9 @@ def main():
         hf_dataset = DatasetDict({'train': train_subset, 'validation': val_subset})
         
     train_augs = SegmentationAugmentation(patch_size=config.PATCH_SIZE)
-    train_dataset = CoralscapesMTLDataset(hf_dataset, split='train', augmentations=train_augs)
-    val_dataset = CoralscapesMTLDataset(hf_dataset, split='validation', augmentations=None)
+    train_dataset = CoralscapesMTLDataset(hf_dataset, split='train', augmentations=train_augs, patch_size=config.PATCH_SIZE)
+    # --- FIX: Pass patch_size to the validation dataset ---
+    val_dataset = CoralscapesMTLDataset(hf_dataset, split='validation', augmentations=None, patch_size=config.PATCH_SIZE)
     
     train_loader = DataLoader(train_dataset, batch_size=config.BATCH_SIZE, shuffle=True, 
                               num_workers=config.NUM_WORKERS, pin_memory=config.PIN_MEMORY)
@@ -55,8 +56,6 @@ def main():
     loss_fn = CoralMTLLoss(num_classes=num_classes, w_aux=config.W_AUX, w_consistency=config.W_CONSISTENCY,
                            hybrid_alpha=config.HYBRID_ALPHA, focal_gamma=config.FOCAL_GAMMA).to(config.DEVICE)
                            
-    # --- FIX: Use math.ceil for robust calculation of training steps ---
-    # This prevents total_training_steps from becoming zero when len(train_loader) < grad_accumulation_steps
     num_update_steps_per_epoch = math.ceil(len(train_loader) / config.GRADIENT_ACCUMULATION_STEPS)
     total_training_steps = num_update_steps_per_epoch * config.NUM_EPOCHS
     warmup_steps = int(total_training_steps * config.WARMUP_STEPS_RATIO)
@@ -79,14 +78,11 @@ def main():
     for epoch in range(config.NUM_EPOCHS):
         print(f"\n===== Epoch {epoch+1}/{config.NUM_EPOCHS} =====")
         
-        # Train one epoch
         train_one_epoch(model, train_loader, optimizer, scheduler, loss_fn, scaler, config.DEVICE,
                         config.GRADIENT_ACCUMULATION_STEPS, training_log_history)
         
-        # Validate one epoch
         avg_val_loss = validate_one_epoch(model, val_loader, loss_fn, metrics_calculator, config.DEVICE)
         
-        # Compute and log validation metrics for the epoch
         val_metrics = metrics_calculator.compute()
         for key, value in val_metrics.items():
             validation_log_history[key].append(value)
@@ -97,14 +93,12 @@ def main():
         print(f"  Validation mIoU Genus: {val_metrics['mIoU_genus']:.4f}")
         print(f"  Validation mIoU Health: {val_metrics['mIoU_health']:.4f}")
 
-        # Save the best model checkpoint based on H-Mean
         if val_metrics['H-Mean'] > best_h_mean:
             best_h_mean = val_metrics['H-Mean']
             save_path = os.path.join(config.OUTPUT_DIR, config.BEST_MODEL_NAME)
             torch.save(model.state_dict(), save_path)
             print(f"  >>> New best model saved to {save_path}")
 
-        # Reset metrics calculator for the next epoch
         metrics_calculator.reset()
         
     print("\n--- Training Complete ---")
@@ -112,13 +106,10 @@ def main():
     # --- 5. Post-Training Analysis and Plotting ---
     print("\n--- Generating final plots from training history ---")
     
-    # Live Monitoring Plots
     reporting.plot_composite_losses(training_log_history, save_path=f"{config.OUTPUT_DIR}/composite_loss.png")
     reporting.plot_individual_task_losses(training_log_history, save_path=f"{config.OUTPUT_DIR}/individual_losses.png")
     reporting.plot_uncertainty_weights(training_log_history, save_path=f"{config.OUTPUT_DIR}/uncertainty.png")
     reporting.plot_learning_rate(training_log_history, warmup_steps, save_path=f"{config.OUTPUT_DIR}/lr_schedule.png")
-
-    # Reporting Plots
     reporting.plot_primary_performance(validation_log_history, save_path=f"{config.OUTPUT_DIR}/primary_performance.png")
 
 if __name__ == "__main__":

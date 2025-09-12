@@ -98,7 +98,8 @@ class CoralscapesMTLDataset(Dataset):
     def __init__(self,
                  hf_dataset: 'datasets.Dataset',
                  split: str = 'train',
-                 augmentations: Optional[SegmentationAugmentation] = None):
+                 augmentations: Optional[SegmentationAugmentation] = None,
+                 patch_size: int = 512):
         """
         Args:
             hf_dataset (datasets.Dataset): The loaded Hugging Face dataset object.
@@ -109,6 +110,7 @@ class CoralscapesMTLDataset(Dataset):
         """
         self.dataset_split = hf_dataset[split]
         self.augmentations = augmentations
+        self.patch_size = patch_size
 
         # Create efficient lookup tables for all tasks once during initialization
         self.lookup_tables = {
@@ -119,7 +121,8 @@ class CoralscapesMTLDataset(Dataset):
         # Define a default transformation for validation/testing if no augmentations are provided
         if self.augmentations is None:
             self.default_transform = v2.Compose([
-                v2.ToImage(),   # <--- convert PIL to torch.Tensor [C,H,W]
+                v2.Resize((self.patch_size, self.patch_size), antialias=True),
+                v2.ToImage(),
                 v2.ToDtype(torch.float32, scale=True),
                 v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ])
@@ -156,10 +159,13 @@ class CoralscapesMTLDataset(Dataset):
             final_image, final_masks = self.augmentations(original_image, target_masks_pil)
         else:
             final_image = self.default_transform(original_image)
-            final_masks = {
-                key: torch.from_numpy(np.array(mask)).long()
-                for key, mask in target_masks_pil.items()
-            }
+            resized_masks = {}
+            for key, mask_pil in target_masks_pil.items():
+                # F.resize expects a PIL image, interpolation NEAREST for masks
+                resized_mask = v2.functional.resize(mask_pil, (self.patch_size, self.patch_size), interpolation=v2.InterpolationMode.NEAREST)
+                resized_masks[key] = torch.from_numpy(np.array(resized_mask)).long()
+
+            final_masks = resized_masks
             
         return {'image': final_image, 'masks': final_masks}
 
