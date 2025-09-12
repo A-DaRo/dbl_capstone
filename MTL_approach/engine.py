@@ -10,8 +10,11 @@ def train_one_epoch(model, dataloader, optimizer, scheduler, loss_fn, scaler, de
     """
     model.train()
     
-    loop = tqdm(dataloader, desc=f"Training Epoch", leave=True)
-    for batch in loop:
+    # --- FIX: Use enumerate to get the batch index `i` for gradient accumulation logic ---
+    loop = tqdm(enumerate(dataloader), desc=f"Training Epoch", total=len(dataloader), leave=True)
+    optimizer.zero_grad() # Zero grad once before the loop
+    
+    for i, batch in loop:
         images = batch['image'].to(device, non_blocking=True)
         masks = {k: v.to(device, non_blocking=True) for k, v in batch['masks'].items()}
 
@@ -19,10 +22,10 @@ def train_one_epoch(model, dataloader, optimizer, scheduler, loss_fn, scaler, de
         with torch.amp.autocast(device_type=str(device), dtype=torch.float16):
             predictions = model(images)
             loss_dict = loss_fn(predictions, masks)
-            total_loss = loss_dict['total_loss']
+            # Normalize loss for gradient accumulation
+            total_loss = loss_dict['total_loss'] / grad_accumulation_steps
         
         # 2. Backpropagation using GradScaler to prevent underflow
-        optimizer.zero_grad()
         scaler.scale(total_loss).backward()
 
         # --- GRADIENT ACCUMULATION LOGIC ---
@@ -33,7 +36,8 @@ def train_one_epoch(model, dataloader, optimizer, scheduler, loss_fn, scaler, de
             scheduler.step()
         # --- END LOGIC ---
         # 4. Log batch-level metrics for live monitoring
-        log_history['total_loss'].append(total_loss.item())
+        # We multiply by accumulation steps to log the true, non-normalized loss
+        log_history['total_loss'].append(total_loss.item() * grad_accumulation_steps)
         log_history['primary_loss'].append(loss_dict['primary_loss'].item())
         log_history['auxiliary_loss'].append(loss_dict['auxiliary_loss'].item())
         log_history['genus_loss'].append(loss_dict['genus_loss'].item())
@@ -42,7 +46,7 @@ def train_one_epoch(model, dataloader, optimizer, scheduler, loss_fn, scaler, de
         log_history['log_var_genus'].append(loss_dict['log_var_genus'].item())
         log_history['log_var_health'].append(loss_dict['log_var_health'].item())
         
-        loop.set_postfix(loss=total_loss.item())
+        loop.set_postfix(loss=(total_loss.item() * grad_accumulation_steps))
 
 def validate_one_epoch(model, dataloader, loss_fn, metrics_calculator, device):
     """
