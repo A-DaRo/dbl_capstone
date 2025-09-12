@@ -1,56 +1,54 @@
-# File: model.py
-# Description: Assembles the full CoralMTLSegFormer model.
+# model.py
 
-import torch
 import torch.nn as nn
 from typing import Dict
 
-from transformers import SegformerModel
+# Import the custom encoder and decoder modules
+from segformer_encoder import SegFormerEncoder
+from hierarchical_decoder import HierarchicalContextAwareDecoder
 
-# Assumes decoder.py is in the same directory
-from decoder import CoralMTLDecoder
+class CoralMTLModel(nn.Module):
+    """
+    The main multi-task learning model for coral segmentation.
 
-class CoralMTLSegFormerHuggingFace(nn.Module):
+    This class encapsulates the SegFormer encoder and the custom hierarchical
+    context-aware decoder into a single, cohesive model.
     """
-    The complete MTL model. Uses OOP to compose the encoder, decoder, and heads.
-    """
-    def __init__(
-        self,
-        n_genus_classes: int,
-        n_health_classes: int,
-        encoder_name: str = "nvidia/mit-b5",
-        decoder_segmentation_channels: int = 768,
-    ):
+    def __init__(self, encoder_name: str, decoder_channel: int, num_classes: Dict[str, int], attention_dim: int):
+        """
+        Args:
+            encoder_name (str): The Hugging Face ID or local path for the SegFormer backbone.
+            decoder_channel (int): The unified channel dimension for all decoder streams.
+            num_classes (Dict[str, int]): A dictionary mapping task names to their number of classes.
+            attention_dim (int): The dimension for the query, key, and value in the attention module.
+        """
         super().__init__()
         
-        self.encoder = SegformerModel.from_pretrained(encoder_name)
+        # 1. Instantiate the pre-trained encoder backbone
+        self.encoder = SegFormerEncoder(pretrained_weights_path=encoder_name)
         
-        self.decoder = CoralMTLDecoder(
-            encoder_channels=self.encoder.config.hidden_sizes,
-            segmentation_channels=decoder_segmentation_channels,
-        )
-        
-        head_in_channels = decoder_segmentation_channels * len(self.encoder.config.hidden_sizes)
-
-        # Prediction heads for each task
-        self.genus_head = nn.Sequential(
-            nn.Conv2d(head_in_channels, n_genus_classes, kernel_size=1),
-            nn.UpsamplingBilinear2d(scale_factor=4)
-        )
-        self.health_head = nn.Sequential(
-            nn.Conv2d(head_in_channels, n_health_classes, kernel_size=1),
-            nn.UpsamplingBilinear2d(scale_factor=4)
+        # 2. Instantiate the custom multi-task decoder
+        self.decoder = HierarchicalContextAwareDecoder(
+            encoder_channels=self.encoder.channels,
+            decoder_channel=decoder_channel,
+            num_classes=num_classes,
+            attention_dim=attention_dim
         )
 
-    def forward(self, pixel_values: torch.Tensor) -> Dict[str, torch.Tensor]:
+    def forward(self, x):
         """
-        The forward pass is a high-level composition of the model's components.
-        """
-        # Encoder -> Decoder -> Heads
-        features = self.encoder(pixel_values, output_hidden_states=True).hidden_states
-        final_f_genus, final_f_health = self.decoder(features)
+        Defines the forward pass of the model.
         
-        mask_genus = self.genus_head(final_f_genus)
-        mask_health = self.health_head(final_f_health)
+        Args:
+            x (torch.Tensor): The input image tensor of shape (B, 3, H, W).
 
-        return {"genus": mask_genus, "health": mask_health}
+        Returns:
+            Dict[str, torch.Tensor]: A dictionary of output logits for each task.
+        """
+        # Get multi-scale feature maps from the encoder
+        features = self.encoder(x)
+        
+        # Process features through the decoder to get multi-task logits
+        logits = self.decoder(features)
+        
+        return logits
