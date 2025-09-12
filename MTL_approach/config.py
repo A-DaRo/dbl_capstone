@@ -5,7 +5,7 @@ import torch
 class Config:
     """A single class to hold all training configuration."""
     # --- Dataset and DataLoader ---
-    BATCH_SIZE = 16
+    BATCH_SIZE = 4
     GRADIENT_ACCUMULATION_STEPS = 4
     NUM_WORKERS = 4
     PIN_MEMORY = True
@@ -37,4 +37,4 @@ class Config:
     
     # --- Debugging ---
     # If True, uses a tiny subset of the data for a quick test run of the pipeline.
-    DEBUG = Falses
+    DEBUG = False
