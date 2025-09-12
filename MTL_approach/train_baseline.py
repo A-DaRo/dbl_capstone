@@ -151,7 +151,10 @@ def train_one_epoch_baseline(model, dataloader, optimizer, scheduler, loss_fn, s
     for i, batch in loop:
         images, masks = batch['image'].to(device, non_blocking=True), batch['mask'].to(device, non_blocking=True)
         with torch.amp.autocast(device_type=str(device), dtype=torch.float16):
-            loss = loss_fn(model(images), masks) / grad_accumulation_steps
+            # --- FIX: Access the .logits attribute from the model output ---
+            outputs = model(pixel_values=images)
+            loss = loss_fn(outputs.logits, masks) / grad_accumulation_steps
+            # ----------------------------------------------------------------
         scaler.scale(loss).backward()
         if (i + 1) % grad_accumulation_steps == 0 or (i + 1) == len(dataloader):
             scaler.step(optimizer)
@@ -170,8 +173,11 @@ def validate_one_epoch_baseline(model, dataloader, loss_fn, metrics_calculator, 
         for batch in loop:
             images, masks = batch['image'].to(device, non_blocking=True), batch['mask'].to(device, non_blocking=True)
             with torch.amp.autocast(device_type=str(device), dtype=torch.float16):
-                total_val_loss += loss_fn(model(images), masks).item()
-            metrics_calculator.update(model(images), masks)
+                # --- FIX: Run forward pass once and access .logits for both loss and metrics ---
+                outputs = model(pixel_values=images)
+                total_val_loss += loss_fn(outputs.logits, masks).item()
+                metrics_calculator.update(outputs.logits, masks)
+                # -----------------------------------------------------------------------------
     return total_val_loss / len(dataloader)
 
 
@@ -297,10 +303,9 @@ def main():
         batch = next(iter(val_loader))
         images = batch['image'].to(config.DEVICE)
         gt_masks = batch['mask']
-        # The model call inside validate_one_epoch_baseline also uses autocast, but for clarity and consistency, 
-        # let's wrap this single inference call in it too.
-        with torch.amp.autocast(device_type=str(config.DEVICE), dtype=torch.float16):
-            pred_logits = model(images)
+        # --- FIX: Access .logits here as well ---
+        pred_logits = model(pixel_values=images).logits
+        # ------------------------------------------
         pred_masks = torch.argmax(pred_logits, dim=1)
 
         # reporting.plot_qualitative_grid expects dicts, so we adapt
@@ -310,6 +315,7 @@ def main():
             {'Prediction': pred_masks.cpu()},
             save_path=f"{config.OUTPUT_DIR}/baseline_qualitative_grid.png"
         )
+
 
 if __name__ == "__main__":
     # The plotting section is now updated with plt.close() to reflect this.
