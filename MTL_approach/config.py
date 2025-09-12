@@ -5,7 +5,7 @@ import torch
 class Config:
     """A single class to hold all training configuration."""
     # --- Dataset and DataLoader ---
-    BATCH_SIZE = 8
+    BATCH_SIZE = 16
     GRADIENT_ACCUMULATION_STEPS = 4
     NUM_WORKERS = 4
     PIN_MEMORY = True
@@ -20,7 +20,7 @@ class Config:
     LEARNING_RATE = 6e-5
     WEIGHT_DECAY = 0.01
     ADAM_BETAS = (0.9, 0.999)
-    NUM_EPOCHS = 50
+    NUM_EPOCHS = 100
     WARMUP_STEPS_RATIO = 0.1  # 10% of total steps for warmup
 
     # --- Loss Function ---
@@ -37,4 +37,4 @@ class Config:
     
     # --- Debugging ---
     # If True, uses a tiny subset of the data for a quick test run of the pipeline.
-    DEBUG = True
+    DEBUG = Falses
