@@ -1,4 +1,5 @@
 # project specific ignores
+pds_training_patches/
 seaview/
 models/
 dataset/
