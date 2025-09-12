@@ -17,12 +17,12 @@ import math
 import json
 from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
+from transformers import SegformerForSemanticSegmentation
 
 # --- REUSABLE COMPONENTS (Assumed to be in the project structure) ---
-from segformer_encoder import SegFormerEncoder
 from augmentations import SegmentationAugmentation
 from optimizer import create_optimizer_and_scheduler
-from losses import FocalLoss, DiceLoss
+from losses import CoralLoss
 from metrics import EPS
 import live_monitoring  # Import for live training plots
 import reporting       # Import for final performance reports
@@ -43,7 +43,7 @@ class ConfigBaseline:
     # --- Model Architecture ---
     ENCODER_NAME = "nvidia/mit-b2"
     DECODER_CHANNEL = 768
-    NUM_CLASSES = 39 + 1 # 39 classes + 1 'unlabeled' class
+    NUM_CLASSES = 39  # Original Coralscapes classes excluding 'unlabeled' (0)
 
     # --- Optimizer and Scheduler ---
     LEARNING_RATE = 6e-5
@@ -111,48 +111,6 @@ class CoralscapesSingleTaskDataset(Dataset):
             final_mask = torch.from_numpy(np.array(resized_mask)).long()
         return {'image': final_image, 'mask': final_mask}
 
-
-# === 3. BASELINE-SPECIFIC MODEL ARCHITECTURE ===
-
-class SegFormerMLPDecoder(nn.Module):
-    """A simple MLP decoder head, standard for SegFormer."""
-    def __init__(self, encoder_channels: List[int], decoder_channel: int, num_classes: int):
-        super().__init__()
-        self.mlps = nn.ModuleList([nn.Sequential(nn.Conv2d(c, decoder_channel, 1), nn.BatchNorm2d(decoder_channel), nn.ReLU(inplace=True)) for c in encoder_channels])
-        self.fusion = nn.Sequential(nn.Conv2d(decoder_channel * len(encoder_channels), decoder_channel, 1, bias=False), nn.BatchNorm2d(decoder_channel), nn.ReLU(inplace=True))
-        self.predictor = nn.Conv2d(decoder_channel, num_classes, 1)
-
-    def forward(self, features: List[torch.Tensor]) -> torch.Tensor:
-        target_size = features[0].shape[-2:]
-        projected = [F.interpolate(self.mlps[i](feat), size=target_size, mode='bilinear', align_corners=False) for i, feat in enumerate(features)]
-        fused = self.fusion(torch.cat(projected, dim=1))
-        return self.predictor(fused)
-
-class SegFormerSingleTask(nn.Module):
-    """A single-task SegFormer model for the baseline."""
-    def __init__(self, encoder_name: str, decoder_channel: int, num_classes: int):
-        super().__init__()
-        self.encoder = SegFormerEncoder(pretrained_weights_path=encoder_name)
-        self.decoder = SegFormerMLPDecoder(self.encoder.channels, decoder_channel, num_classes)
-
-    def forward(self, images: torch.Tensor) -> torch.Tensor:
-        features = self.encoder(images)
-        logits_quarter_res = self.decoder(features)
-        return F.interpolate(logits_quarter_res, size=images.shape[-2:], mode='bilinear', align_corners=False)
-
-
-# === 4. BASELINE-SPECIFIC LOSS & METRICS ===
-
-class BaselineHybridLoss(nn.Module):
-    """A simple hybrid Focal + Dice loss for the single-task baseline."""
-    def __init__(self, alpha: float = 0.5, gamma: float = 2.0):
-        super().__init__()
-        self.alpha = alpha
-        self.focal_loss = FocalLoss(gamma=gamma, ignore_index=0)
-        self.dice_loss = DiceLoss(ignore_index=0)
-
-    def forward(self, logits, targets):
-        return self.alpha * self.focal_loss(logits, targets) + (1 - self.alpha) * self.dice_loss(logits, targets)
 
 class SingleTaskMetrics:
     """A simplified metrics calculator for the single-task baseline."""
@@ -241,8 +199,11 @@ def main():
     train_loader = DataLoader(train_dataset, config.BATCH_SIZE, shuffle=True, num_workers=config.NUM_WORKERS, pin_memory=config.PIN_MEMORY)
     val_loader = DataLoader(val_dataset, config.BATCH_SIZE, shuffle=False, num_workers=config.NUM_WORKERS, pin_memory=config.PIN_MEMORY)
     
-    model = SegFormerSingleTask(config.ENCODER_NAME, config.DECODER_CHANNEL, config.NUM_CLASSES).to(config.DEVICE)
-    loss_fn = BaselineHybridLoss(alpha=config.HYBRID_ALPHA, gamma=config.FOCAL_GAMMA).to(config.DEVICE)
+    model = SegformerForSemanticSegmentation.from_pretrained(
+                config.ENCODER_NAME, id2label={i:i for i in range(0, config.NUM_CLASSES)}, 
+                semantic_loss_ignore_index = 0, ignore_mismatched_sizes=True
+            )
+    loss_fn = CoralLoss().to(config.DEVICE)
 
     num_steps_per_epoch = math.ceil(len(train_loader) / config.GRADIENT_ACCUMULATION_STEPS)
     total_steps = num_steps_per_epoch * config.NUM_EPOCHS

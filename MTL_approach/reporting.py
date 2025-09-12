@@ -91,14 +91,21 @@ def plot_confusion_matrix(cm: np.ndarray, class_names: List[str], task_name: str
 
 def plot_qualitative_grid(images: torch.Tensor, gt_masks: Dict[str, torch.Tensor], pred_masks: Dict[str, torch.Tensor], save_path: str = None):
     """
-    --- FIX 2: A flexible grid that adapts to the provided tasks ---
-    Generates a grid comparing input images, ground truths, and predictions.
-    It now dynamically determines the number of rows based on the keys in the mask dictionaries.
+    Generates a flexible grid comparing input images, ground truths, and predictions.
+    It now dynamically determines the number of rows and handles differing keys between
+    the ground truth and prediction dictionaries, assuming a corresponding order.
     """
     num_samples = images.shape[0]
-    tasks = list(gt_masks.keys())  # Dynamically get task names from the dictionary keys
-    num_tasks = len(tasks)
-
+    
+    # --- FIX: Get task names/keys from BOTH dictionaries independently ---
+    gt_task_names = list(gt_masks.keys())
+    pred_task_names = list(pred_masks.keys())
+    
+    # A critical check to ensure the dictionaries are parallel
+    assert len(gt_task_names) == len(pred_task_names), \
+        f"Mismatch in number of tasks: {len(gt_task_names)} GTs vs {len(pred_task_names)} Preds."
+    
+    num_tasks = len(gt_task_names)
     # 1 row for the input image, plus 2 rows for each task (GT and Prediction)
     num_rows = 1 + (num_tasks * 2)
 
@@ -108,25 +115,28 @@ def plot_qualitative_grid(images: torch.Tensor, gt_masks: Dict[str, torch.Tensor
     for i in range(num_samples):
         axes[0, i].imshow(denormalize(images[i]))
         axes[0, i].set_title(f'Sample {i+1}', fontsize=14)
-    axes[0, 0].set_ylabel('Input Image', fontsize=14) # Label only the first column
+    axes[0, 0].set_ylabel('Input Image', fontsize=14)
 
     # --- Subsequent Rows: GT and Predictions for each task ---
-    for task_idx, task_name in enumerate(tasks):
+    for task_idx in range(num_tasks):
+        # --- FIX: Use the corresponding key from each list ---
+        gt_key = gt_task_names[task_idx]
+        pred_key = pred_task_names[task_idx]
+        
         gt_row = 1 + (task_idx * 2)
         pred_row = 2 + (task_idx * 2)
         
-        # Use different colormaps for visual distinction between tasks
         cmap = 'viridis' if task_idx % 2 == 0 else 'inferno'
 
         for i in range(num_samples):
-            # Plot Ground Truth
-            axes[gt_row, i].imshow(gt_masks[task_name][i], cmap=cmap)
-            # Plot Prediction
-            axes[pred_row, i].imshow(pred_masks[task_name][i], cmap=cmap)
+            # Plot Ground Truth using its key
+            axes[gt_row, i].imshow(gt_masks[gt_key][i], cmap=cmap)
+            # Plot Prediction using its key
+            axes[pred_row, i].imshow(pred_masks[pred_key][i], cmap=cmap)
 
-        # Set row labels
-        axes[gt_row, 0].set_ylabel(f'GT {task_name}', fontsize=14)
-        axes[pred_row, 0].set_ylabel(f'Pred {task_name}', fontsize=14)
+        # Set row labels using the keys from each dictionary
+        axes[gt_row, 0].set_ylabel(f'GT {gt_key}', fontsize=14)
+        axes[pred_row, 0].set_ylabel(f'Pred {pred_key}', fontsize=14)
 
     # General formatting for all axes
     for r in range(num_rows):
@@ -154,52 +164,79 @@ def print_results_table(results: Dict[str, Dict[str, float]]):
 
 
 if __name__ == '__main__':
-    print("--- Running Demo of Reporting Plots & Tables ---")
+    print("--- Running Demo & Tests for reporting.py ---")
 
-    # --- 1. Dummy Validation History (10 epochs) ---
+    # --- Test Case 1: Multi-Task Performance Reporting ---
+    print("\n--- Test Case 1: Multi-Task Scenario (e.g., from main training) ---")
+
+    # 1a. Test plot_primary_performance
+    print("  1a. Plotting Primary Performance vs. Epoch...")
     mock_val_history = {
         'H-Mean': [0.45, 0.55, 0.62, 0.68, 0.71, 0.73, 0.74, 0.735, 0.72, 0.715],
         'mIoU_genus': [0.40, 0.50, 0.58, 0.65, 0.69, 0.70, 0.72, 0.71, 0.70, 0.69],
         'mIoU_health': [0.50, 0.60, 0.66, 0.71, 0.73, 0.76, 0.76, 0.76, 0.74, 0.74]
     }
-    print("\n1. Plotting Primary Performance vs. Epoch...")
     plot_primary_performance(mock_val_history)
 
-    # --- 2. Dummy Per-Class IoU for Genus ---
+    # 1b. Test plot_per_class_iou_bar_chart
+    print("  1b. Plotting Per-Class IoU Bar Chart...")
     genus_names = ["background", "other", "massive", "branching", "acropora", "table", "pocillopora", "meandering", "stylophora"]
     mock_genus_iou = {name: np.random.uniform(0.3, 0.95) for name in genus_names}
     mock_genus_iou['pocillopora'] = 0.25 # Simulate a rare, difficult class
-    print("\n2. Plotting Per-Class IoU Bar Chart...")
+    mock_genus_iou['massive'] = 0.0 # Simulate a class not present in validation set
     plot_per_class_iou_bar_chart(mock_genus_iou, "Genus")
 
-    # --- 3. Dummy Confusion Matrix ---
+    # 1c. Test plot_confusion_matrix with an edge case
+    print("  1c. Plotting Confusion Matrix (with zero-row edge case)...")
     num_genus_classes = len(genus_names)
     mock_cm = np.random.randint(0, 50, size=(num_genus_classes, num_genus_classes))
     np.fill_diagonal(mock_cm, np.random.randint(200, 500, size=num_genus_classes))
-    mock_cm[4, 8] = 150 # Simulate confusing acropora with stylophora
-    print("\n3. Plotting Confusion Matrix...")
+    mock_cm[4, 8] = 150  # Simulate confusing acropora with stylophora
+    # --- Explicitly test the division-by-zero fix ---
+    # Set the 'massive' class row (index 2) to all zeros, simulating it never
+    # appearing in the ground truth of the validation set.
+    mock_cm[2, :] = 0
+    print("      > Note: The 'massive' class row in the CM is all zeros, testing the fix.")
     plot_confusion_matrix(mock_cm, genus_names, "Genus")
 
-    # --- 4. Dummy Qualitative Data ---
+    # 1d. Test plot_qualitative_grid for the multi-task case
+    print("  1d. Plotting Qualitative Grid for Multi-Task Scenario...")
     B, C, H, W = 2, 3, 256, 256
     mock_images = torch.rand(B, C, H, W)
-    mock_gt_masks = {
-        'genus': torch.randint(0, num_genus_classes, (B, H, W)),
-        'health': torch.randint(0, 4, (B, H, W)),
+    # Dictionaries with task-specific keys
+    mock_gt_masks_mtl = {
+        'Genus': torch.randint(0, num_genus_classes, (B, H, W)),
+        'Health': torch.randint(0, 4, (B, H, W)),
     }
-    mock_pred_masks = { # Predictions are similar to GT but with some errors
-        'genus': mock_gt_masks['genus'].clone(),
-        'health': mock_gt_masks['health'].clone(),
+    mock_pred_masks_mtl = {
+        'Genus': mock_gt_masks_mtl['Genus'].clone(),
+        'Health': mock_gt_masks_mtl['Health'].clone(),
     }
-    mock_pred_masks['genus'][:, 100:150, 100:150] = 5 # Add a block of error
-    print("\n4. Plotting Qualitative Grid...")
-    plot_qualitative_grid(mock_images, mock_gt_masks, mock_pred_masks)
+    mock_pred_masks_mtl['Genus'][:, 100:150, 100:150] = 5  # Add a block of error
+    plot_qualitative_grid(mock_images, mock_gt_masks_mtl, mock_pred_masks_mtl)
+    print("--- Multi-Task Scenario Tests Passed ---")
 
-    # --- 5. Dummy Final Results Table ---
+
+    # --- Test Case 2: Single-Task (Baseline) Qualitative Grid ---
+    print("\n--- Test Case 2: Single-Task (Baseline) Scenario ---")
+    print("  2a. Testing plot_qualitative_grid's flexibility...")
+    # Dictionaries with generic keys, as produced by train_baseline.py
+    mock_gt_masks_baseline = {'Ground Truth': torch.randint(0, 40, (B, H, W))}
+    mock_pred_masks_baseline = {'Prediction': mock_gt_masks_baseline['Ground Truth'].clone()}
+    mock_pred_masks_baseline['Prediction'][:, 50:100, 50:100] = 10 # Add some error
+    plot_qualitative_grid(mock_images, mock_gt_masks_baseline, mock_pred_masks_baseline)
+    print("--- Single-Task Scenario Test Passed ---")
+
+
+    # --- Test Case 3: Final Results Table ---
+    print("\n--- Test Case 3: Final Results Table ---")
+    print("  3a. Printing Final Results Table...")
     mock_final_results = {
         "Single-Task (Genus)": {"mIoU_genus": 0.68, "BIoU_genus": 0.55, "mIoU_health": 0, "H-Mean": 0},
         "Single-Task (Health)": {"mIoU_genus": 0, "BIoU_genus": 0, "mIoU_health": 0.72, "H-Mean": 0},
         "Coral-MTL (Ours)": {"mIoU_genus": 0.74, "BIoU_genus": 0.65, "mIoU_health": 0.76, "H-Mean": 0.75}
     }
-    print("\n5. Printing Final Results Table...")
     print_results_table(mock_final_results)
+    print("--- Final Table Test Passed ---")
+
+    print("\n--- All reporting.py tests completed successfully! ---")
