@@ -12,14 +12,14 @@ from torchvision.transforms import v2
 # Based on the analysis of functional relevance, semantic cohesion, and data-driven insights,
 # we define the mappings from the 39 original classes to our 2 primary and 3 auxiliary tasks.
 
-# The background class is 0 for all tasks. Other classes start from 1.
+# The unlabeled class is 0 for all tasks. Other classes start from 1.
 
 # A dictionary to hold all task definitions for clarity and scalability.
 # Each task has a 'mapping' (new_id -> [old_ids]) and an 'id2label' map.
 TASK_DEFINITIONS = {
     "genus": {
         "id2label": {
-            0: "background", 1: "other_coral", 2: "massive_meandering", 3: "branching",
+            0: "unlabeled", 1: "other_coral", 2: "massive_meandering", 3: "branching",
             4: "acropora", 5: "table_acropora", 6: "pocillopora", 7: "meandering", 8: "stylophora",
         },
         "mapping": {
@@ -34,7 +34,7 @@ TASK_DEFINITIONS = {
         },
     },
     "health": {
-        "id2label": {0: "background", 1: "alive", 2: "bleached", 3: "dead"},
+        "id2label": {0: "unlabeled", 1: "alive", 2: "bleached", 3: "dead"},
         "mapping": {
             1: [6, 17, 22, 25, 28, 31, 34, 36],  # alive
             2: [16, 19, 33],                   # bleached
@@ -42,19 +42,19 @@ TASK_DEFINITIONS = {
         },
     },
     "fish": {
-        "id2label": {0: "background", 1: "fish"},
+        "id2label": {0: "unlabeled", 1: "fish"},
         "mapping": {
             1: [9], # fish
         },
     },
     "human_artifacts": {
-        "id2label": {0: "background", 1: "artifact"},
+        "id2label": {0: "unlabeled", 1: "artifact"},
         "mapping": {
             1: [7, 8, 15], # human, transect tools, transect line
         },
     },
     "substrate": {
-        "id2label": {0: "background", 1: "sand", 2: "rock_rubble", 3: "algae_covered"},
+        "id2label": {0: "unlabeled", 1: "sand", 2: "rock_rubble", 3: "algae_covered"},
         "mapping": {
             1: [5],         # sand
             2: [12, 18],    # unknown hard substrate, rubble

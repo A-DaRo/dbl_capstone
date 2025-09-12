@@ -8,45 +8,64 @@ import segmentation_models_pytorch as smp
 
 class CoralLoss(nn.Module):
     """
-    A single-task hybrid loss function for baselining on the Coralscapes dataset.
-    It combines Focal Loss and Dice Loss to provide a robust objective for the
-    complex, imbalanced single-task problem. This is NOT a multi-task loss and
-    does not use uncertainty weighting. Its purpose is to serve as a fair
-    comparison against the primary task performance of the MTL model.
+    A flexible, single-task hybrid loss function for baselining on the Coralscapes dataset.
+    It combines a primary classification loss (Focal or Cross-Entropy) with Dice Loss.
+    This is NOT a multi-task loss and does not use uncertainty weighting.
     """
     def __init__(self,
+                 primary_loss_type: str = 'focal',
                  hybrid_alpha: float = 0.5,
                  focal_gamma: float = 2.0,
                  dice_smooth: float = 1.0,
+                 class_weights: Optional[torch.Tensor] = None,
                  ignore_index: int = 0):
         """
         Args:
-            hybrid_alpha (float): Weight for the Focal Loss component. Dice Loss weight is (1 - alpha).
-            focal_gamma (float): Focusing parameter for Focal Loss.
+            primary_loss_type (str): The main classification loss. One of ['focal', 'cross_entropy'].
+            hybrid_alpha (float): Weight for the primary loss. Dice Loss weight is (1 - alpha).
+            focal_gamma (float): Focusing parameter for Focal Loss (used if primary_loss_type='focal').
             dice_smooth (float): Smoothing factor for Dice Loss.
+            class_weights (torch.Tensor, optional): Optional class weights for Cross-Entropy.
             ignore_index (int): Specifies a target value to be ignored by all loss components.
         """
         super().__init__()
+        
+        if primary_loss_type not in ['focal', 'cross_entropy']:
+            raise ValueError(f"primary_loss_type must be 'focal' or 'cross_entropy', but got {primary_loss_type}")
+            
         self.hybrid_alpha = hybrid_alpha
         
-        # Instantiate loss components using the robust smp library
-        self.focal_loss = smp.losses.FocalLoss(
-            mode='multiclass',
-            gamma=focal_gamma,
-            ignore_index=ignore_index
-        )
+        # Instantiate primary loss component based on the choice
+        if primary_loss_type == 'focal':
+            self.primary_loss = smp.losses.FocalLoss(
+                mode='multiclass',
+                gamma=focal_gamma,
+                ignore_index=ignore_index
+            )
+        elif primary_loss_type == 'cross_entropy':
+            self.primary_loss = smp.losses.CrossEntropyLoss(
+                weight=class_weights,
+                ignore_index=ignore_index
+            )
+        
+        # Instantiate Dice loss component
         self.dice_loss = smp.losses.DiceLoss(
             mode='multiclass',
             ignore_index=ignore_index,
             smooth=dice_smooth
         )
-        print(f"Initialized CoralLoss (for baselines) with ignore_index={ignore_index}")
+        print(f"Initialized CoralLoss with primary loss '{primary_loss_type}' and ignore_index={ignore_index}")
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        loss_focal = self.focal_loss(logits, targets.long())
+        loss_primary = self.primary_loss(logits, targets.long())
         loss_dice = self.dice_loss(logits, targets.long())
         
-        total_loss = self.hybrid_alpha * loss_focal + (1 - self.hybrid_alpha) * loss_dice
+        # Only add dice loss if its weight is > 0 to avoid unnecessary computation
+        if self.hybrid_alpha < 1.0:
+            total_loss = self.hybrid_alpha * loss_primary + (1 - self.hybrid_alpha) * loss_dice
+        else:
+            total_loss = loss_primary
+            
         return total_loss
 
 # --- Main Composite Loss Function ---
