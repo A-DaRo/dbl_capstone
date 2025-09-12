@@ -43,7 +43,7 @@ class ConfigBaseline:
     # --- Model Architecture ---
     ENCODER_NAME = "nvidia/mit-b2"
     DECODER_CHANNEL = 768
-    NUM_CLASSES = 39  # Original Coralscapes classes excluding 'unlabeled' (0)
+    NUM_CLASSES = 39 + 1  # Original Coralscapes classes including 'unlabeled' (0)
 
     # --- Optimizer and Scheduler ---
     LEARNING_RATE = 6e-5
