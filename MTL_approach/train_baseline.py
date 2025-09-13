@@ -18,6 +18,7 @@ import json
 from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 from transformers import SegformerForSemanticSegmentation
+from datasets import Dataset as HFDataset  # Corrected import for type hinting
 
 # --- REUSABLE COMPONENTS (Assumed to be in the project structure) ---
 from augmentations import SegmentationAugmentation
@@ -79,7 +80,7 @@ def get_class_names() -> List[str]:
 class CoralscapesSingleTaskDataset(Dataset):
     """Simplified dataset for the single-task baseline."""
     def __init__(self,
-                 hf_dataset: 'datasets.Dataset',
+                 hf_dataset: 'HFDataset',
                  split: str = 'train',
                  augmentations: Optional[SegmentationAugmentation] = None,
                  patch_size: int = 512):

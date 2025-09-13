@@ -2,6 +2,7 @@ import torch
 from torch.utils.data import Dataset
 import numpy as np
 from datasets import load_dataset
+from datasets import Dataset as HFDataset
 from PIL import Image
 from typing import Dict, Optional
 
@@ -23,14 +24,14 @@ TASK_DEFINITIONS = {
             4: "acropora", 5: "table_acropora", 6: "pocillopora", 7: "meandering", 8: "stylophora",
         },
         "mapping": {
-            1: [6],             # other_coral
-            2: [16, 17, 23],    # massive_meandering
-            3: [19, 20, 22],    # branching
-            4: [25],            # acropora
-            5: [28, 32],        # table_acropora
-            6: [31],            # pocillopora
-            7: [33, 36, 37],    # meandering
-            8: [34],            # stylophora
+            0: [6],             # other_coral
+            1: [16, 17, 23],    # massive_meandering
+            2: [19, 20, 22],    # branching
+            3: [25],            # acropora
+            4: [28, 32],        # table_acropora
+            5: [31],            # pocillopora
+            6: [33, 36, 37],    # meandering
+            7: [34],            # stylophora
         },
     },
     "health": {
@@ -96,13 +97,13 @@ class CoralscapesMTLDataset(Dataset):
       ToTensor/Normalize transform for validation/testing.
     """
     def __init__(self,
-                 hf_dataset: 'datasets.Dataset',
+                 hf_dataset: 'HFDataset',
                  split: str = 'train',
                  augmentations: Optional[SegmentationAugmentation] = None,
                  patch_size: int = 512):
         """
         Args:
-            hf_dataset (datasets.Dataset): The loaded Hugging Face dataset object.
+            hf_dataset (HFDataset): The loaded Hugging Face dataset object.
             split (str): The dataset split to use (e.g., 'train', 'validation', 'test').
             augmentations (Optional[SegmentationAugmentation]): An augmentation object.
                 If provided (for training), it will be applied. If None (for validation/testing),
