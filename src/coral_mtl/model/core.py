@@ -13,13 +13,15 @@ class CoralMTLModel(nn.Module):
     This class encapsulates the SegFormer encoder and the custom hierarchical
     context-aware decoder into a single, cohesive model.
     """
-    def __init__(self, encoder_name: str, decoder_channel: int, num_classes: Dict[str, int], attention_dim: int):
+    def __init__(self, encoder_name: str, decoder_channel: int, num_classes: Dict[str, int], attention_dim: int, primary_tasks: List[str] = ['genus', 'health'], aux_tasks: List[str] = ['fish', 'human_artifacts', 'substrate']):
         """
         Args:
             encoder_name (str): The Hugging Face ID for the SegFormer backbone.
             decoder_channel (int): The unified channel dimension for all decoder streams.
             num_classes (Dict[str, int]): A dictionary mapping task names to their number of classes.
             attention_dim (int): The dimension for the query, key, and value in the attention module.
+            primary_tasks (List[str]): List of primary task names.
+            aux_tasks (List[str]): List of auxiliary task names.
         """
         super().__init__()
         
@@ -29,7 +31,9 @@ class CoralMTLModel(nn.Module):
             encoder_channels=self.encoder.channels,
             decoder_channel=decoder_channel,
             num_classes=num_classes,
-            attention_dim=attention_dim
+            attention_dim=attention_dim,
+            primary_tasks=primary_tasks,
+            aux_tasks=aux_tasks
         )
 
     def forward(self, images: torch.Tensor) -> Dict[str, torch.Tensor]:

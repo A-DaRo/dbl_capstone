@@ -28,7 +28,9 @@ class HierarchicalContextAwareDecoder(nn.Module):
                  encoder_channels: List[int],
                  decoder_channel: int,
                  num_classes: Dict[str, int],
-                 attention_dim: int = 256):
+                 attention_dim: int = 256,
+                 primary_tasks: List[str] = ['genus', 'health'],
+                 aux_tasks: List[str] = ['fish', 'human_artifacts', 'substrate']):
         """
         Args:
             encoder_channels (List[int]): Channel dimensions from the encoder's stages.
@@ -40,10 +42,10 @@ class HierarchicalContextAwareDecoder(nn.Module):
         assert len(encoder_channels) == 4, "Requires features from 4 encoder stages."
 
         # Task definitions are now hardcoded in the model architecture for clarity
-        self.primary_tasks = ['panoptic_shape', 'panoptic_health']
-        self.aux_tasks = ['fish', 'human_artifacts', 'substrate']
-        self.tasks = self.primary_tasks + self.aux_tasks
-        
+        self.primary_tasks = primary_tasks
+        self.aux_tasks = aux_tasks
+        self.tasks = primary_tasks + aux_tasks
+
         self.decoder_channel = decoder_channel
 
         # Channel Unification MLPs

@@ -229,7 +229,11 @@ To address the severe spatial imbalance in the Coralscapes dataset (where vast a
     3.  **Patch Extraction:** Once the algorithm terminates, a fixed-size square patch (e.g., 512x512 pixels) is extracted, centered on each of the accepted sample points.
     4.  **Class-Related Radius (Context-Aware Refinement):** This is a crucial refinement to the standard PDS. The minimum distance `r` is not a single global value. Instead, it is adapted based on the local class density. In regions dominated by sparse, minority coral genera, `r` might be smaller to allow for more frequent sampling. In areas with dense, common genera, `r` could be larger to prevent over-representation of a single large colony. This ensures the resulting patch dataset captures the varied ecological contexts and local densities of the reef.
 
-*   **4.3. Pipeline Integration:** This sampling process is a **pre-processing step**. It is run once on the full-resolution training orthomosaics to generate a static pool of high-quality image patches. The model's data loader will then draw mini-batches directly from this pre-generated pool during training.
+*   **4.3. Pipeline Integration:** This sampling process is a **computationally intensive pre-processing step**. It is run once on the full-resolution training orthomosaics via the `scripts/1_create_pds_dataset.py` script to generate a static pool of high-quality image patches. The model's data loader will then draw mini-batches directly from this pre-generated pool during training.
+
+    To ensure this step is efficient and enables rapid experimentation, the script has been heavily optimized:
+    *   **Parallel Processing:** The script leverages Python's `multiprocessing` module to process multiple large orthomosaics in parallel. This distributes the workload across all available CPU cores, dramatically reducing the total wall-clock time required to generate the full patch dataset.
+    *   **Just-In-Time (JIT) Compilation:** The core Poisson Disk Sampling algorithm, which is a performance bottleneck due to its iterative nature and nested loops, is accelerated using the Numba JIT compiler. This translates the performance-critical Python code into highly optimized machine code at runtime, providing a significant speedup for each worker process.
 
 ---
 
@@ -351,13 +355,16 @@ This is the iterative process of learning the model weights from the training da
 
 #### **8.2. The Validation Pipeline (Model Selection)**
 
-This pipeline is run periodically during training (e.g., at the end of every epoch) to monitor performance on a held-out validation set and select the best model.
+This pipeline is run periodically during training (e.g., at the end of every epoch) to monitor the model's true generalization performance and select the best checkpoint. To ensure the validation metrics are a reliable proxy for final test performance, this pipeline explicitly simulates the testing conditions.
 
 1.  **Switch to Eval Mode:** The model is set to evaluation mode (`model.eval()`). This disables layers like dropout. All operations are wrapped in a `torch.no_grad()` context to disable gradient computation, saving memory and time.
 2.  **Data Loading:** The `DataLoader` iterates through the validation set patches. **No data augmentation is applied**, except for the standard channel-wise normalization, to ensure a consistent evaluation.
-3.  **Inference:** For each batch, a forward pass is performed to get the output logits for all heads.
-4.  **Metric Calculation:** The predicted logits are converted to class predictions (via `argmax`). These predictions are compared against the ground-truth masks to compute all defined evaluation metrics (mIoU, BIoU for primary tasks; IoU for auxiliary tasks).
-5.  **Model Checkpointing:** The **H-Mean** is calculated. If the current H-Mean is the best seen so far, the model's current state (weights, optimizer state) is saved to a file (e.g., `best_model.pth`). This checkpoint represents the best-performing model discovered during training.
+3.  **Sliding Window Inference:** For each full validation image, the model performs inference using a **sliding window** approach, identical to the one in the testing pipeline.
+    *   The image is tiled into overlapping patches (e.g., 512x512).
+    *   The model predicts on each patch.
+    *   The patch-wise predictions are stitched back into a full-resolution map by averaging the logits in overlapping regions.
+4.  **Metric Calculation on Full Maps:** The stitched prediction maps are compared against the full-resolution ground-truth masks to compute all evaluation metrics (mIoU, BIoU, etc.).
+5.  **Model Checkpointing:** The **H-Mean** is calculated from the full-map metrics. If the current H-Mean is the best seen so far, the model's state is saved to `best_model.pth`. This ensures we checkpoint the model that performs best under realistic, challenging conditions, not just on curated training patches.
 
 #### **8.3. The Testing Pipeline (Final Evaluation)**
 

@@ -16,14 +16,16 @@ class CoralMTLMetrics:
                  num_classes: Dict[str, int],
                  device: torch.device,
                  boundary_thickness: int = 2,
-                 ignore_index: int = 255):
+                 ignore_index: int = 255,
+                 primary_tasks: List[str] = ['genus', 'health'],
+                 aux_tasks: List[str] = ['fish', 'human_artifacts', 'substrate']):
         self.num_classes = num_classes
         self.device = device
         self.boundary_thickness = boundary_thickness
         self.ignore_index = ignore_index
 
-        self.primary_tasks = ['genus', 'health']
-        self.aux_tasks = ['fish', 'human_artifacts', 'substrate']
+        self.primary_tasks = primary_tasks
+        self.aux_tasks = aux_tasks
         self.all_tasks = self.primary_tasks + self.aux_tasks
         
         self.reset()
