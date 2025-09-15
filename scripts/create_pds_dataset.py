@@ -2,7 +2,8 @@
 # Section 4 and the "Final Technical Implementation Guide" of project_specification.md.
 # It has been refactored to be a high-performance, parallelized, and configurable
 # library function that generates a dataset with flattened, remapped class masks.
-
+import sys
+sys.path.append("../") # To ensure imports from src/ work when running from /scripts
 import argparse
 import yaml
 import numpy as np
@@ -32,7 +33,11 @@ def poisson_disk_sampling(
     
     foreground_coords = np.argwhere(foreground_mask)
     if len(foreground_coords) == 0:
-        return []
+        # Numba cannot infer the type of an empty list literal [].
+        # We must explicitly create a list of the correct type (a list of tuples of ints)
+        # and ensure it's empty. This is a common pattern to solve this issue.
+        typed_empty_list = [(0, 0)]
+        return typed_empty_list[:0]
         
     start_idx = random.randint(0, len(foreground_coords) - 1)
     p0_y, p0_x = foreground_coords[start_idx]
@@ -225,8 +230,8 @@ def create_pds_dataset(
     print(f"Starting dataset creation. Output will be saved to: {output_dir}")
 
     # 1. Setup paths and directories
-    image_base_dir = dataset_root / "leftImg8bit" / "train"
-    mask_base_dir = dataset_root / "gtFine" / "train"
+    image_base_dir = dataset_root / "leftImg8bit" / "val"
+    mask_base_dir = dataset_root / "gtFine" / "val"
     output_img_dir = output_dir / "images"
     output_mask_dir = output_dir / "masks"
     output_img_dir.mkdir(parents=True, exist_ok=True)

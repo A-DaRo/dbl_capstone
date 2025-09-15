@@ -73,19 +73,35 @@ def _generate_plot_chunk(df_chunk: pd.DataFrame, output_path: Path):
            label='Original', hatch='//', facecolor='none', 
            edgecolor='dodgerblue', linewidth=1.5, zorder=3)
     
+    # Find the maximum data value to determine the plot's upper bound
+    # We need this to ensure annotations don't go off-screen.
+    max_data_value = max(df_chunk['Original'].max(), df_chunk['PDS'].max())
+    
     # Add % Change annotations above the bars
     for i, (label, row) in enumerate(df_chunk.iterrows()):
-        y_pos = max(row['Original'], row['PDS']) * 1.2 # Position text above the taller bar
+        # Position text 20% above the taller bar
+        y_pos = max(row['Original'], row['PDS']) * 1.2 
         text = f"{row['%_Change']:+.1f}%"
-        ax.text(i, y_pos, text, ha='center', va='bottom', fontsize=9, color='darkgrey', zorder=4)
+        # Ensure y_pos is not zero or negative for log scale
+        if y_pos > 0:
+            ax.text(i, y_pos, text, ha='center', va='bottom', fontsize=9, color='darkgrey', zorder=4)
 
     # --- Axes and Grid Formatting ---
-    ax.set_ylabel('Total Pixel Count (Log Scale)', fontsize=14)
+    ax.set_ylabel('Total Pixel Count', fontsize=14)
     ax.set_yscale('log')
+    
+    # We set the top limit to be 40% higher than the tallest bar, 
+    # giving plenty of space for the y_pos = max * 1.2 annotation.
+    # We get the bottom limit from whatever matplotlib decided initially.
+    current_bottom_lim, _ = ax.get_ylim()
+    ax.set_ylim(bottom=current_bottom_lim, top=max_data_value * 1.4)
+
+    ax.yaxis.set_major_locator(mticker.LogLocator(base=10.0))
+    ax.yaxis.set_minor_locator(mticker.NullLocator())
+    
     ax.set_xticks(x)
     ax.set_xticklabels(df_chunk.index, rotation=45, ha='right', fontsize=12)
     ax.grid(axis='y', linestyle='--', alpha=0.7, zorder=0)
-    ax.yaxis.set_major_formatter(mticker.ScalarFormatter()) # Better formatting for log scale
     ax.tick_params(axis='x', which='major', pad=5)
 
     # --- Final Touches ---
@@ -125,7 +141,7 @@ def compare_and_visualize(
         remapping_lut = _create_remapping_lut_from_yaml(task_definition_path)
 
     print("Analyzing original dataset...")
-    original_mask_dir = original_dataset_root / "gtFine" / "train"
+    original_mask_dir = original_dataset_root / "gtFine" / "val"
     original_counts = _calculate_pixel_counts(original_mask_dir, remapping_lut)
 
     # 3. Combine data into a Pandas DataFrame for analysis
