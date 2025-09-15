@@ -29,8 +29,7 @@ coral-mtl-project/
 │       ├── data/
 │       │   ├── __init__.py
 │       │   ├── augmentations.py
-│       │   ├── dataset.py
-│       │   └── transforms.py
+│       │   └── dataset.py
 │       ├── model/
 │       │   ├── __init__.py
 │       │   ├── attention.py
