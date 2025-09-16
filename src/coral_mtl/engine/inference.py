@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 from tqdm import tqdm
-from typing import Dict, Union
+from typing import Dict, List, Tuple, Union
 
 class SlidingWindowInferrer:
     """
@@ -96,7 +96,7 @@ class SlidingWindowInferrer:
             
         return final_logits
 
-    def _pad_image(self, image: torch.Tensor) -> (torch.Tensor, tuple):
+    def _pad_image(self, image: torch.Tensor) -> Tuple[torch.Tensor, Tuple[int, int]]:
         """Pads the image to be divisible by the stride."""
         c, h, w = image.shape
         
@@ -107,7 +107,7 @@ class SlidingWindowInferrer:
         padded_image = F.pad(image, (0, pad_w, 0, pad_h), mode='reflect')
         return padded_image, (pad_h, pad_w)
 
-    def _extract_patches(self, padded_image: torch.Tensor) -> (torch.Tensor, list):
+    def _extract_patches(self, padded_image: torch.Tensor) -> Tuple[torch.Tensor, List[Tuple[int, int]]]:
         """Efficiently extracts patches and their coordinates using unfold."""
         c, h_pad, w_pad = padded_image.shape
         
