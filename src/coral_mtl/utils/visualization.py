@@ -1,32 +1,290 @@
 import json
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import seaborn as sns
 import torch
 
+# --- Helper Functions ---
 
 def _save_plot_data(data: Dict, save_path: str):
     """Helper function to save plot data to a JSON file if a path is provided."""
     if save_path:
         json_path = Path(save_path).with_suffix('.json')
         json_path.parent.mkdir(parents=True, exist_ok=True)
-        # Convert numpy arrays/tensors to lists for JSON serialization
         serializable_data = {}
         for key, value in data.items():
             if isinstance(value, np.ndarray):
                 serializable_data[key] = value.tolist()
             elif isinstance(value, torch.Tensor):
                 serializable_data[key] = value.tolist()
-            elif isinstance(value, list) and value and isinstance(value[0], torch.Tensor):
+            elif isinstance(value, (list, tuple)) and value and isinstance(value[0], torch.Tensor):
                 serializable_data[key] = [v.item() for v in value]
             else:
                 serializable_data[key] = value
         
         with open(json_path, 'w') as f:
             json.dump(serializable_data, f, indent=4)
+
+def denormalize(tensor: torch.Tensor) -> np.ndarray:
+    """Helper to denormalize an image tensor for visualization based on ImageNet stats (Spec 5.2)."""
+    mean = torch.tensor([0.485, 0.456, 0.406], device=tensor.device).view(3, 1, 1)
+    std = torch.tensor([0.229, 0.224, 0.225], device=tensor.device).view(3, 1, 1)
+    tensor = tensor.clone() * std + mean
+    return tensor.permute(1, 2, 0).cpu().numpy().clip(0, 1)
+
+
+# ==============================================================================
+# 1. High-Level Performance Metrics: Model Comparison
+# Strategy Report Section 1
+# ==============================================================================
+
+def plot_model_comparison_bar_chart(results: Dict[str, Dict[str, float]], save_path: str = None):
+    """
+    Implements Strategy 1: Generates a grouped bar chart to compare key performance
+    metrics across different models (e.g., CoralMTL vs. Baseline).
+    """
+    _save_plot_data(results, save_path)
+    
+    df = pd.DataFrame(results).T.reset_index().rename(columns={'index': 'Model'})
+    df_melted = df.melt(id_vars='Model', var_name='Metric', value_name='Score')
+
+    plt.style.use('seaborn-v0_8-whitegrid')
+    fig, ax = plt.subplots(figsize=(12, 8))
+    
+    sns.barplot(data=df_melted, x='Metric', y='Score', hue='Model', ax=ax, palette=['#1f77b4', '#999999'])
+    
+    ax.set_title('High-Level Model Performance Comparison', fontsize=18, pad=20)
+    ax.set_xlabel('Key Performance Metric', fontsize=12)
+    ax.set_ylabel('Score (e.g., mIoU)', fontsize=12)
+    ax.set_ylim(0, max(1.0, df_melted['Score'].max() * 1.1))
+    ax.legend(title='Model', fontsize=10)
+    
+    # Add annotations
+    for p in ax.patches:
+        ax.annotate(f'{p.get_height():.3f}', (p.get_x() + p.get_width() / 2., p.get_height()),
+                    ha='center', va='center', fontsize=10, color='black', xytext=(0, 5),
+                    textcoords='offset points')
+                    
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, bbox_inches='tight')
+    plt.show()
+    plt.close(fig)
+
+# ==============================================================================
+# 2. Per-Class Performance and Class Imbalance
+# Strategy Report Section 2
+# ==============================================================================
+
+def plot_per_class_iou_bar_chart(class_iou: Dict[str, float], task_name: str, save_path: str = None):
+    """
+    Implements Strategy 2: Generates a bar chart of IoU for each class of a given task.
+    This helps diagnose performance on a granular level.
+    """
+    _save_plot_data(class_iou, save_path)
+
+    # Sort by IoU score for better pattern recognition
+    sorted_items = sorted(class_iou.items(), key=lambda item: item[1], reverse=True)
+    class_names = [item[0] for item in sorted_items]
+    iou_scores = [item[1] for item in sorted_items]
+
+    plt.style.use('seaborn-v0_8-whitegrid')
+    fig, ax = plt.subplots(figsize=(14, 8))
+    colors = plt.cm.viridis(np.linspace(0.1, 0.9, len(class_names)))
+    bars = ax.bar(class_names, iou_scores, color=colors)
+    
+    ax.set_title(f'Per-Class IoU for {task_name.title()} Task', fontsize=18, pad=20)
+    ax.set_xlabel('Class Name', fontsize=12)
+    ax.set_ylabel('IoU Score', fontsize=12)
+    ax.set_ylim(0, 1.0)
+    plt.xticks(rotation=45, ha='right', fontsize=10)
+    
+    for bar in bars:
+        yval = bar.get_height()
+        plt.text(bar.get_x() + bar.get_width()/2.0, yval, f'{yval:.2f}', ha='center', va='bottom', fontsize=9)
+        
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, bbox_inches='tight')
+    plt.show()
+    plt.close(fig)
+
+# ==============================================================================
+# 3. Diagnostic Error Analysis (TIDE-inspired)
+# Strategy Report Section 3
+# ==============================================================================
+
+def _calculate_error_rates(cm: np.ndarray, bg_class_idx: int = 0) -> Dict[str, float]:
+    """Calculates TIDE-inspired error rates from a confusion matrix."""
+    total_pixels = cm.sum()
+    if total_pixels == 0: return {'Classification': 0, 'Background': 0, 'Missed': 0}
+    
+    fg_indices = [i for i in range(cm.shape[0]) if i != bg_class_idx]
+    
+    # Classification Error: GT is foreground, Pred is a *different* foreground
+    class_error = 0
+    for r in fg_indices:
+        for c in fg_indices:
+            if r != c:
+                class_error += cm[r, c]
+
+    # Background Error (False Positive): GT is background, Pred is foreground
+    bg_error = cm[bg_class_idx, fg_indices].sum()
+
+    # Missed Error (False Negative): GT is foreground, Pred is background
+    missed_error = cm[fg_indices, bg_class_idx].sum()
+
+    total_error = class_error + bg_error + missed_error
+    if total_error == 0: return {'Classification': 0, 'Background': 0, 'Missed': 0}
+
+    return {
+        'Classification Error': class_error / total_error,
+        'Background Error (FP)': bg_error / total_error,
+        'Missed Error (FN)': missed_error / total_error
+    }
+
+def plot_diagnostic_error_breakdown(
+    results: Dict[str, Tuple[np.ndarray, List[str]]],
+    task_name: str,
+    save_path: str = None
+):
+    """
+    Implements Strategy 3: Creates a stacked bar chart of the TIDE-inspired error
+    decomposition for one or more models.
+    """
+    error_data = {model: _calculate_error_rates(cm, class_names.index('Background'))
+                  for model, (cm, class_names) in results.items()}
+    _save_plot_data(error_data, save_path)
+    
+    df = pd.DataFrame(error_data).T
+    
+    plt.style.use('seaborn-v0_8-whitegrid')
+    fig, ax = plt.subplots(figsize=(10, 7))
+    
+    df.plot(kind='barh', stacked=True, ax=ax, colormap='viridis')
+    
+    ax.set_title(f'Diagnostic Error Breakdown for {task_name.title()} Task', fontsize=18, pad=20)
+    ax.set_xlabel('Proportion of Total Error', fontsize=12)
+    ax.set_ylabel('Model', fontsize=12)
+    ax.set_xlim(0, 1.0)
+    ax.legend(title='Error Type', bbox_to_anchor=(1.02, 1), loc='upper left')
+    
+    # Add percentage annotations
+    for c in ax.containers:
+        labels = [f'{v.get_width()*100:.1f}%' if v.get_width() > 0.02 else '' for v in c]
+        ax.bar_label(c, labels=labels, label_type='center', color='white', weight='bold')
+        
+    plt.tight_layout(rect=[0, 0, 0.85, 1])
+    if save_path:
+        plt.savefig(save_path, bbox_inches='tight')
+    plt.show()
+    plt.close(fig)
+
+def plot_top_k_misclassifications(cm: np.ndarray, class_names: List[str], task_name: str, k: int = 5, save_path: str = None):
+    """
+    Plots top-k misclassifications for each class as a stacked bar chart. This is
+    a detailed deep-dive, complementary to the high-level error breakdown.
+    """
+    np.fill_diagonal(cm, 0)
+    
+    plot_data = []
+    for i, true_class in enumerate(class_names):
+        if true_class == 'Background': continue
+        row = cm[i, :]
+        top_k_indices = np.argsort(row)[::-1][:k]
+        for j in top_k_indices:
+            if row[j] > 0:
+                plot_data.append({'True Class': true_class, 'Predicted Class': class_names[j], 'Count': row[j]})
+    
+    if not plot_data:
+        print(f"No misclassifications to plot for task {task_name}.")
+        return
+
+    df = pd.DataFrame(plot_data)
+    df_pivot = df.pivot(index='True Class', columns='Predicted Class', values='Count').fillna(0)
+    
+    plt.style.use('seaborn-v0_8-whitegrid')
+    fig, ax = plt.subplots(figsize=(12, 1 + len(df_pivot) * 0.4))
+    
+    df_pivot.plot(kind='barh', stacked=True, ax=ax, colormap='tab20')
+    
+    ax.invert_yaxis()
+    ax.set_xlabel('Misclassification Count (e.g., Pixel Count)', fontsize=12)
+    ax.set_ylabel('True Class', fontsize=12)
+    ax.set_title(f'Top {k} Misclassifications for {task_name.title()} Task', fontsize=18, pad=20)
+    ax.legend(title='Predicted As', bbox_to_anchor=(1.02, 1), loc='upper left')
+    
+    plt.tight_layout(rect=[0, 0, 0.85, 1])
+    if save_path:
+        plt.savefig(save_path, bbox_inches='tight')
+    plt.show()
+    plt.close(fig)
+
+# ==============================================================================
+# 4. Qualitative Results & Spatial Context
+# Strategy Report Section 4
+# ==============================================================================
+
+def plot_qualitative_grid_with_errors(
+    images: torch.Tensor,
+    gt_masks: torch.Tensor,
+    pred_masks: torch.Tensor,
+    task_name: str,
+    save_path: str = None,
+    num_samples: int = 4
+):
+    """
+    Implements Strategy 4: Generates an enhanced small-multiple grid comparing
+    input images, ground truths, predictions, and a detailed error map.
+    """
+    num_samples = min(num_samples, images.shape[0])
+    fig, axes = plt.subplots(num_samples, 4, figsize=(16, 4 * num_samples), squeeze=False)
+
+    for i in range(num_samples):
+        # 1. Input Image
+        axes[i, 0].imshow(denormalize(images[i]))
+        
+        # 2. Ground Truth Mask
+        gt_mask = gt_masks[i].cpu().numpy()
+        axes[i, 1].imshow(gt_mask, cmap='viridis')
+        
+        # 3. Prediction Mask
+        pred_mask = pred_masks[i].cpu().numpy()
+        axes[i, 2].imshow(pred_mask, cmap='viridis')
+        
+        # 4. Error Map
+        # 0: Correct (TP/TN), 1: False Positive (FP), 2: False Negative (FN)
+        error_map = np.zeros_like(gt_mask)
+        error_map[(gt_mask == 0) & (pred_mask != 0)] = 1 # FP
+        error_map[(gt_mask != 0) & (pred_mask != gt_mask)] = 2 # FN or Misclassification as FN
+        error_map[(gt_mask != 0) & (pred_mask == 0)] = 2 # FN
+        
+        # Using a specific colormap for errors
+        cmap_err = plt.cm.colors.ListedColormap(['#d3d3d3', '#ff7f0e', '#1f77b4']) # Gray, Orange, Blue
+        axes[i, 3].imshow(error_map, cmap=cmap_err, vmin=0, vmax=2)
+
+    # Set titles and labels
+    col_titles = ['Input Image', 'Ground Truth', 'Prediction', 'Error Map (FP/FN)']
+    for ax, title in zip(axes[0], col_titles):
+        ax.set_title(title, fontsize=14)
+        
+    for i in range(num_samples):
+        axes[i, 0].set_ylabel(f'Sample {i+1}', fontsize=14)
+        
+    for ax in axes.flat:
+        ax.set_xticks([]); ax.set_yticks([])
+        
+    plt.suptitle(f'Qualitative Results for {task_name.title()} Task', fontsize=20, y=1.02)
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, bbox_inches='tight')
+    plt.show()
+    plt.close(fig)
+
 
 # --- Plotting Functions for In-Training Monitoring ---
 

@@ -4,6 +4,8 @@ import os
 from collections import defaultdict
 import optuna
 
+from .inference import SlidingWindowInferrer
+
 class Trainer:
     """
     A generic training and validation engine for Coral-MTL and baseline models.
@@ -25,7 +27,7 @@ class Trainer:
         self.trial = trial # For Optuna integration
         
         self.device = config.DEVICE
-        self.scaler = torch.amp.GradScaler('cuda')
+        self.scaler = torch.amp.GradScaler(enabled=(self.device.type == 'cuda'))
         
         self.best_metric = -1.0
         self.training_log = defaultdict(list)
@@ -75,39 +77,60 @@ class Trainer:
             loop.set_postfix(loss=(total_loss.item() * self.config.GRADIENT_ACCUMULATION_STEPS))
 
     def _validate_one_epoch(self):
-        """Executes a single validation epoch."""
+        """
+        Executes a single validation epoch using sliding window inference.
+        This method implements the procedure from Spec Section 8.2, ensuring
+        that validation metrics are a reliable proxy for test performance.
+        """
         self.model.eval()
-        total_val_loss = 0.0
         self.metrics_calculator.reset()
+        
+        # Instantiate the inferrer for validation as per Spec Section 8.2
+        # This simulates the final testing pipeline for reliable model selection.
+        inferrer = SlidingWindowInferrer(
+            model=self.model,
+            patch_size=self.config.PATCH_SIZE,
+            stride=self.config.INFERENCE_STRIDE,
+            device=self.device,
+            batch_size=self.config.INFERENCE_BATCH_SIZE
+        )
         
         loop = tqdm(self.val_loader, desc=f"Validation", leave=False)
         with torch.no_grad():
             for batch in loop:
-                images = batch['image'].to(self.device, non_blocking=True)
-                masks = batch['masks'] if isinstance(batch.get('masks'), dict) else batch['mask']
+                # The validation loader should yield full images, typically with batch size 1.
+                # We loop through the batch in case batch_size > 1.
+                batch_images = batch['image']
                 
-                if isinstance(masks, dict):
-                    masks = {k: v.to(self.device, non_blocking=True) for k, v in masks.items()}
-                else:
-                    masks = masks.to(self.device, non_blocking=True)
-
-                with torch.amp.autocast(device_type=self.device.type, dtype=torch.float16):
-                    predictions = self.model(images)
-                    loss_dict_or_tensor = self.loss_fn(predictions, masks)
+                for i in range(batch_images.shape[0]):
+                    full_image = batch_images[i] # Shape: (C, H, W)
                     
-                    if isinstance(loss_dict_or_tensor, dict):
-                        total_val_loss += loss_dict_or_tensor['total_loss'].item()
-                    else:
-                        total_val_loss += loss_dict_or_tensor.item()
+                    # Perform sliding window inference to get stitched prediction logits
+                    # Implements Spec Section 8.2, step 3
+                    stitched_predictions = inferrer.predict(full_image)
+
+                    # Prepare ground truth masks for metric calculation
+                    if 'masks' in batch: # MTL case
+                        gt_masks = {k: v[i].to(self.device) for k, v in batch['masks'].items()}
+                        # Unsqueeze predictions and masks for metric calculator (expects batch dim)
+                        stitched_predictions = {k: v.unsqueeze(0) for k, v in stitched_predictions.items()}
+                        gt_masks_batched = {k: v.unsqueeze(0) for k, v in gt_masks.items()}
+                    else: # Baseline case
+                        gt_masks = batch['mask'][i].to(self.device)
+                        # Unsqueeze predictions and masks for metric calculator (expects batch dim)
+                        stitched_predictions = {k: v.unsqueeze(0) for k, v in stitched_predictions.items()}
+                        gt_masks_batched = gt_masks.unsqueeze(0)
                 
-                self.metrics_calculator.update(predictions, masks)
+                    # Update metrics with full-resolution stitched maps
+                    # Implements Spec Section 8.2, step 4
+                    self.metrics_calculator.update(stitched_predictions, gt_masks_batched)
         
-        avg_val_loss = total_val_loss / len(self.val_loader)
+        # Note: Loss is not calculated during validation, as the focus is on metrics
+        # from the realistic sliding window inference pipeline.
         val_metrics = self.metrics_calculator.compute()
         
         for key, value in val_metrics.items():
             self.validation_log[key].append(value)
-        self.validation_log['val_loss'].append(avg_val_loss)
 
         return val_metrics
 
@@ -120,16 +143,17 @@ class Trainer:
             val_metrics = self._validate_one_epoch()
             
             # Use 'H-Mean' for MTL, 'mIoU' for baseline
+            # This is the key metric for model selection as per Spec Section 7.3.1
             current_metric = val_metrics.get('H-Mean', val_metrics.get('mIoU', -1.0))
             
             print(f"Epoch {epoch+1} Summary:")
-            print(f"  Avg Validation Loss: {self.validation_log['val_loss'][-1]:.4f}")
-            print(f"  Validation Metric: {current_metric:.4f} (Best: {max(self.best_metric, current_metric):.4f})")
+            # We no longer report validation loss, focusing on the more meaningful metrics.
+            print(f"  Validation Metric ({self.config.MODEL_SELECTION_METRIC}): {current_metric:.4f} (Best: {max(self.best_metric, current_metric):.4f})")
 
             if current_metric > self.best_metric:
                 self.best_metric = current_metric
                 os.makedirs(self.config.OUTPUT_DIR, exist_ok=True)
-                save_path = os.path.join(self.config.OUTPUT_DIR, self.config.BEST_MODEL_NAME)
+                save_path = os.path.join(self.config.OUTPUT_DIR, "best_model.pth")
                 torch.save(self.model.state_dict(), save_path)
                 print(f"  >>> New best model saved to {save_path}")
 

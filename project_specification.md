@@ -295,31 +295,28 @@ The loss function is a composite, multi-part objective that reflects the hierarc
 
 ### **7. Evaluation Metrics**
 
-To rigorously assess the performance of our hierarchical multi-task model, we will employ a suite of metrics that evaluate not only pixel-level accuracy but also the quality of the predicted shapes and the model's performance on its distinct tasks. The metrics are categorized based on their purpose.
+To rigorously assess our model, we employ a multi-faceted evaluation strategy. This includes standard performance metrics (like mIoU) to measure overall success, fine-grained metrics (like BIoU) to evaluate specific objectives, and a suite of diagnostic metrics to provide deep, actionable insights into the model's failure modes.
 
 #### **7.1. Primary Task Metrics (Core Objectives)**
 
 These are the most important metrics and will be the primary measure of the model's success. They will be calculated for both the **Genus** and **Health** segmentation heads.
 
 *   **7.1.1. Mean Intersection over Union (mIoU):** This is the gold standard for semantic segmentation. It measures the overlap between the predicted mask and the ground-truth mask for each class and then averages this score across all classes.
-    *   **Formula:** `IoU = True Positives / (True Positives + False Positives + False Negatives)`
-    *   **Calculation:** We will compute `mIoU_Genus` (averaged over all coral genera classes + background) and `mIoU_Health` (averaged over Healthy, Bleached, Dead + background).
     *   **Purpose:** To provide a robust measure of overall segmentation accuracy for our core tasks.
 
-*   **7.1.2. Boundary IoU (BIoU):** This advanced metric specifically addresses the "nitid shapes" requirement by focusing on the quality of the predicted boundaries. It is less sensitive to errors in the interior of large objects and more sensitive to the precision of the object's outline.
-    *   **Mechanism:** It creates a thin "boundary band" of a few pixels' width around the edge of the ground-truth and predicted shapes. It then calculates the IoU of these two bands.
-    *   **Calculation:** We will compute `BIoU_Genus` to evaluate how well the model delineates the complex morphological structures of different corals.
-    *   **Purpose:** To quantitatively measure the model's ability to produce clean, accurate, and non-noisy boundaries for our primary tasks. This is a key metric for validating our architectural choices.
+*   **7.1.2. Boundary IoU (BIoU):** This advanced metric specifically addresses the "nitid shapes" requirement by focusing on the quality of the predicted boundaries.
+    *   **Mechanism:** It creates a thin "boundary band" around the edge of the ground-truth and predicted shapes and calculates the IoU of these two bands.
+    *   **Purpose:** To quantitatively measure the model's ability to produce clean, accurate boundaries. In our error analysis framework, **BIoU serves as the direct semantic segmentation equivalent of TIDE's *Localization Error***, providing a quantitative measure of boundary fidelity.
 
-*   **7.1.3. Mean Pixel Accuracy (mPA):** This metric calculates the percentage of correctly classified pixels for each class and averages it over all classes. It is simpler than mIoU and provides a complementary view of performance.
+*   **7.1.3. Mean Pixel Accuracy (mPA):** This metric calculates the percentage of correctly classified pixels for each class and averages it over all classes.
     *   **Purpose:** To offer a straightforward accuracy score, useful for sanity checks and high-level comparison.
 
 #### **7.2. Auxiliary Task Metrics (Diagnostic Tools)**
 
 The performance on these tasks is not an end goal but a diagnostic tool to understand if the model is successfully learning the contextual regularizers.
 
-*   **7.2.1. Class-specific IoU:** For each auxiliary head (`Fish`, `Human-Artifact`, `Substrate`), we will calculate the IoU for the positive class(es) only. For example, `IoU_Fish` will measure the performance on the `Fish` class, not the background.
-    *   **Purpose:** To verify that the auxiliary heads are effectively learning their respective tasks. High performance indicates successful feature disentanglement in the shared encoder. Low performance might suggest the task is too difficult or is not contributing positively to regularization.
+*   **7.2.1. Class-specific IoU:** For each auxiliary head (`Fish`, `Human-Artifact`, `Substrate`), we will calculate the IoU for the positive class(es) only.
+    *   **Purpose:** To verify that the auxiliary heads are effectively learning their respective tasks. High performance indicates successful feature disentanglement in the shared encoder.
 
 #### **7.3. Overall Model Performance Metric (For Model Selection)**
 
@@ -327,7 +324,23 @@ To compare different training runs and select the best model checkpoint, it is u
 
 *   **7.3.1. Hierarchical Mean (H-Mean):** We define a custom metric that reflects the primacy of our core tasks. It is a simple average of the mIoU scores of the two primary heads.
     *   **Formula:** `H-Mean = (mIoU_Genus + mIoU_Health) / 2`
-    *   **Purpose:** To serve as the key metric for model selection during the validation phase. The model checkpoint with the highest H-Mean on the validation set will be considered the "best model".
+    *   **Purpose:** To serve as the key metric for model selection during the validation phase.
+
+#### **7.4. Diagnostic Error Analysis (TIDE-inspired)**
+
+To gain a deeper understanding of our model's failure modes beyond aggregate scores like mIoU, we will implement a suite of diagnostic metrics inspired by the **TIDE framework**. This allows us to decompose the model's total error into distinct, actionable categories, helping to explain *why* performance changes between experiments (e.g., distinguishing between a model that confuses similar corals and one that hallucinates corals on sandy bottoms). These metrics are calculated per task from the final confusion matrix.
+
+*   **7.4.1. Classification Error Rate:**
+    *   **Definition:** Measures the fraction of pixels where a ground-truth foreground class (e.g., *Acropora*) is incorrectly predicted as a *different* foreground class (e.g., *Pocillopora*).
+    *   **Purpose:** To diagnose confusion between visually similar classes, which is a key challenge in the fine-grained Genus segmentation task.
+
+*   **7.4.2. Background Error Rate (False Positives):**
+    *   **Definition:** Measures the fraction of pixels where a ground-truth background class is incorrectly predicted as any foreground class.
+    *   **Purpose:** To quantify the model's tendency to "hallucinate" objects where there are none. This is critical for assessing the impact of contextual auxiliary tasks like Substrate segmentation.
+
+*   **7.4.3. Missed Error Rate (False Negatives):**
+    *   **Definition:** Measures the fraction of pixels where a ground-truth foreground class is incorrectly predicted as background.
+    *   **Purpose:** To quantify the model's failure to detect existing objects. This is a key indicator of model sensitivity and recall, especially for small or rare classes.
 
 ---
 
