@@ -10,8 +10,8 @@ def decoder_config():
         "decoder_channel": 256,
         "attention_dim": 128,
         "num_classes": {
-            'panoptic_shape': 9,
-            'panoptic_health': 4,
+            'genus': 9,
+            'health': 4,
             'fish': 2,
             'human_artifacts': 2,
             'substrate': 4

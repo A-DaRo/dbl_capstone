@@ -3,6 +3,9 @@ from tqdm import tqdm
 import os
 from collections import defaultdict
 import optuna
+from pathlib import Path
+import json
+from typing import Dict
 
 from .inference import SlidingWindowInferrer
 
@@ -27,6 +30,7 @@ class Trainer:
         self.trial = trial # For Optuna integration
         
         self.device = config.DEVICE
+        self.output_dir = Path(config.OUTPUT_DIR)
         self.scaler = torch.amp.GradScaler(enabled=(self.device.type == 'cuda'))
         
         self.best_metric = -1.0
@@ -133,6 +137,14 @@ class Trainer:
             self.validation_log[key].append(value)
 
         return val_metrics
+    
+    def _save_results(self, metrics: Dict[str, list], name: str):
+        """Saves the final metrics dictionary to a JSON file."""
+        output_path = self.output_dir / f"{name}_metrics.json"
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        with open(output_path, 'w') as f:
+            json.dump(metrics, f, indent=4)
+        print(f"{name} metrics saved to {output_path}")
 
     def train(self):
         """The main training loop orchestrating epochs, validation, and checkpointing."""
@@ -142,9 +154,8 @@ class Trainer:
             self._train_one_epoch()
             val_metrics = self._validate_one_epoch()
             
-            # Use 'H-Mean' for MTL, 'mIoU' for baseline
-            # This is the key metric for model selection as per Spec Section 7.3.1
-            current_metric = val_metrics.get('H-Mean', val_metrics.get('mIoU', -1.0))
+            # Use the metric specified in the config for model selection
+            current_metric = val_metrics.get(self.config.MODEL_SELECTION_METRIC, -1.0)
             
             print(f"Epoch {epoch+1} Summary:")
             # We no longer report validation loss, focusing on the more meaningful metrics.
@@ -162,5 +173,7 @@ class Trainer:
                 if self.trial.should_prune():
                     raise optuna.exceptions.TrialPruned()
         
+        self._save_results(self.training_log, "training")
+        self._save_results(self.validation_log, "validation")
         print("\n--- Training Complete ---")
         return self.best_metric, self.training_log, self.validation_log

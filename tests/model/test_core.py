@@ -11,8 +11,8 @@ def test_coral_mtl_model_end_to_end_smoke_test():
     B, H, W = 2, 256, 256
     
     num_classes = {
-        'panoptic_shape': 9,
-        'panoptic_health': 4,
+        'genus': 9,
+        'health': 4,
         'fish': 2,
         'human_artifacts': 2,
         'substrate': 4

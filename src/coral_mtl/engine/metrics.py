@@ -87,6 +87,10 @@ class AbstractCoralMetrics(ABC):
             results[f'mIoU_{task}'] = np.nanmean(iou)
             results[f'mPA_{task}'] = np.nanmean(pa)
             
+            # Per-class IoU
+            for i in range(n_cls):
+                results[f'IoU_{task}_class_{i}'] = iou[i]
+            
             # TIDE Error Analysis (implements spec for TIDE errors)
             total_pixels = cm.sum() + EPS
             if n_cls > 1:
@@ -148,23 +152,16 @@ class CoralMetrics(AbstractCoralMetrics):
     Metrics calculator for single-task (non-MTL) models.
     
     This class takes a single prediction tensor and "un-flattens" it into a
-    multi-task structure using a provided YAML definition file, allowing for
+    multi-task structure using a provided task definitions dictionary, allowing for
     a direct, apples-to-apples comparison with MTL models.
     """
     def __init__(self,
-                 task_definitions_path: str,
+                 task_definitions: Dict,
                  device: torch.device,
                  primary_tasks: List[str],
                  **kwargs):
         super().__init__(device=device, primary_tasks=primary_tasks, **kwargs)
-        self._load_and_build_mappings(task_definitions_path)
-        self.reset()
-
-    def _load_and_build_mappings(self, path: str):
-        """Loads YAML and creates LUTs for un-flattening."""
-        with open(path, 'r') as f:
-            task_definitions = yaml.safe_load(f)
-
+        
         self.num_classes = {}
         self.per_task_luts = {}
         self.all_tasks = list(task_definitions.keys())
@@ -172,8 +169,12 @@ class CoralMetrics(AbstractCoralMetrics):
         # Find the max global class ID to determine LUT size
         max_global_id = 0
         for details in task_definitions.values():
-            for new_id_str in details.get('mapping', {}).keys():
-                max_global_id = max(max_global_id, int(new_id_str))
+            # The keys of the 'mapping' are the new IDs for the flattened mask.
+            # We need to find the highest value among them to size the LUT correctly.
+            # Note: these are stored as strings in the YAML, so we must cast to int.
+            all_new_ids = [int(k) for k in details.get('mapping', {}).keys()]
+            if all_new_ids:
+                max_global_id = max(max_global_id, max(all_new_ids))
 
         for task_name, details in task_definitions.items():
             self.num_classes[task_name] = len(details['id2label'])
@@ -187,6 +188,8 @@ class CoralMetrics(AbstractCoralMetrics):
                    if old_id < len(lut): lut[old_id] = local_id
 
             self.per_task_luts[task_name] = lut
+            
+        self.reset()
 
     def update(self, predictions: torch.Tensor, targets: torch.Tensor):
         preds = torch.argmax(predictions, dim=1)

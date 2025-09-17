@@ -141,7 +141,7 @@ def compare_and_visualize(
         remapping_lut = _create_remapping_lut_from_yaml(task_definition_path)
 
     print("Analyzing original dataset...")
-    original_mask_dir = original_dataset_root / "gtFine" / "val"
+    original_mask_dir = original_dataset_root / "gtFine" / "train"
     original_counts = _calculate_pixel_counts(original_mask_dir, remapping_lut)
 
     # 3. Combine data into a Pandas DataFrame for analysis

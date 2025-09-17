@@ -230,8 +230,8 @@ def create_pds_dataset(
     print(f"Starting dataset creation. Output will be saved to: {output_dir}")
 
     # 1. Setup paths and directories
-    image_base_dir = dataset_root / "leftImg8bit" / "val"
-    mask_base_dir = dataset_root / "gtFine" / "val"
+    image_base_dir = dataset_root / "leftImg8bit" / "train"
+    mask_base_dir = dataset_root / "gtFine" / "train"
     output_img_dir = output_dir / "images"
     output_mask_dir = output_dir / "masks"
     output_img_dir.mkdir(parents=True, exist_ok=True)

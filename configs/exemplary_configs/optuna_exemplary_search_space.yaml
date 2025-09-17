@@ -1,0 +1,36 @@
+# --- configs/studies/search_space.yaml ---
+# Defines the hyperparameter search space for an Optuna study.
+# Keys are dot-separated paths to the parameter in the main config file.
+
+optimizer.params.lr:
+  # The name Optuna will use to track this hyperparameter.
+  name: "learning_rate"
+  # The type of suggestion. Maps to trial.suggest_float, trial.suggest_int, etc.
+  type: "float"
+  # Parameters for the suggestion function.
+  params:
+    low: 1.0e-5
+    high: 2.0e-4
+    log: true
+
+optimizer.params.weight_decay:
+  name: "weight_decay"
+  type: "float"
+  params:
+    low: 1.0e-3
+    high: 1.0e-1
+    log: true
+
+loss.params.hybrid_alpha:
+  name: "hybrid_alpha"
+  type: "float"
+  params:
+    low: 0.3
+    high: 0.8
+
+# Example of a categorical parameter
+# data.patch_size:
+#   name: "patch_size"
+#   type: "categorical"
+#   params:
+#     choices: [256, 384, 512]

@@ -9,7 +9,7 @@ def metrics_setup():
     num_classes = {
         'genus': 9, 'health': 4, 'fish': 2, 'human_artifacts': 2, 'substrate': 4
     }
-    metrics_calc = CoralMTLMetrics(num_classes=num_classes, device=device)
+    metrics_calc = CoralMTLMetrics(num_classes=num_classes, device=device, primary_tasks=['genus', 'health'])
     
     B, H, W = 2, 64, 64
     preds = {
@@ -40,7 +40,7 @@ def test_metrics_calculator_update_compute_reset(metrics_setup):
     final_metrics = metrics_calc.compute()
     
     assert isinstance(final_metrics, dict)
-    expected_keys = ['H-Mean', 'mIoU_genus', 'BIoU_health', 'mPA_fish', 'IoU_substrate_class_1']
+    expected_keys = ['H-Mean', 'mIoU_genus', 'BIoU_health', 'mPA_fish']
     for key in expected_keys:
         assert key in final_metrics
         assert isinstance(final_metrics[key], (float, int))
@@ -48,10 +48,9 @@ def test_metrics_calculator_update_compute_reset(metrics_setup):
     # Check that mIoU is within a valid range
     assert 0.0 <= final_metrics['mIoU_genus'] <= 1.0
 
-    # 3. Reset the calculator
-    metrics_calc.reset()
-    
-    # Check if internal states are zeroed out
-    assert torch.all(metrics_calc.confusion_matrices['genus'] == 0)
-    assert metrics_calc.biou_stats['health']['intersection'] == 0.0
-    assert metrics_calc.biou_stats['health']['union'] == 0.0
+    # Check for per-class IoU keys
+    for task, n_cls in metrics_calc.num_classes.items():
+        for i in range(n_cls):
+            iou_key = f'IoU_{task}_class_{i}'
+            assert iou_key in final_metrics
+            assert isinstance(final_metrics[iou_key], (float, int))

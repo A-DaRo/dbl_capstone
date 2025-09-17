@@ -1,0 +1,159 @@
+# --- factory_config.yaml ---
+# This file contains all relevant configurations for the ExperimentFactory's
+# get_model() method. In a real experiment, you would only have one 'model'
+# section active.
+
+# --------------------------------------------------------------------------
+# Configuration for the advanced, dynamic Multi-Task Learning (MTL) model
+# --------------------------------------------------------------------------
+model:
+  # This explicit flag tells the factory to build the CoralMTLModel.
+  type: "CoralMTL"
+
+  params:
+    # Name of the SegFormer backbone from Hugging Face Hub.
+    backbone: "nvidia/mit-b2"
+    # Unified channel dimension for all decoder streams.
+    decoder_channel: 256
+    # Dimension for Query, Key, and Value in the cross-attention module.
+    attention_dim: 128
+
+  # These lists define the task names for the primary and auxiliary decoders.
+  # The factory will look up these names in the task_definitions.yaml file
+  # to determine the number of classes for each corresponding decoder head.
+  tasks:
+    primary: ["genus", "health"]
+    auxiliary: ["fish", "human_artifacts", "substrate"]
+
+# ---
+# The data section is crucial because it points to the task definition file,
+# which is the single source of truth for the model's architecture.
+data:
+  # This file is loaded by the factory's __init__ method to determine the
+  # number of classes for each task head in the CoralMTLModel.
+  task_definitions_path: "configs/task_definitions.yaml"
+  # Other data parameters...
+  dataset_name: "EPFL-ECEO/coralscapes"
+  batch_size: 4
+
+
+optimizer:
+  type: "AdamW"
+  lr: 6.0e-5
+
+
+  loss:
+  # This type corresponds to the CoralMTLLoss class for our main model.
+  type: "CompositeHierarchical"
+
+  params:
+    # Optional weight for the logical consistency penalty term.
+    w_consistency: 0.1
+    # Weight for the primary loss component (Focal/CE) in the hybrid loss.
+    # The Dice loss component will have weight (1 - hybrid_alpha).
+    hybrid_alpha: 0.5
+    # The focusing parameter for the Focal Loss component.
+    focal_gamma: 2.0
+    # The class index to be ignored during loss calculation.
+    ignore_index: 0
+
+# --------------------------------------------------------------------------
+# Configuration for the Optimizer and LR Scheduler
+# --------------------------------------------------------------------------
+optimizer:
+  # This type is mapped to the `create_optimizer_and_scheduler` function.
+  type: "AdamWPolyDecay"
+
+  params:
+    lr: 6.0e-5
+    weight_decay: 0.01
+    adam_betas: [0.9, 0.999]
+    # The percentage of total training steps to use for the linear warmup phase.
+    warmup_ratio: 0.1
+    # The power of the polynomial for the learning rate decay.
+    power: 1.0
+
+
+metrics:
+  # This list is crucial. It tells both metrics calculators which tasks should
+  # be used to compute the Boundary IoU (BIoU) and the final H-Mean score.
+  # The names must match the task names in task_definitions.yaml.
+  primary_tasks: ["genus", "health"]
+  
+  # The thickness of the band (in pixels) used for BIoU calculation.
+  boundary_thickness: 2
+  
+  # The class index to be ignored during metric calculation.
+  # This should be consistent with the ignore_index in the loss function.
+  ignore_index: 0
+
+# --------------------------------------------------------------------------
+# Configuration for the Trainer Engine
+# --------------------------------------------------------------------------
+trainer:
+  # The main device for training. Can be "cuda", "cpu", or "auto".
+  device: "cuda"
+  
+  # Total number of epochs for the training run.
+  epochs: 100
+  
+  # Directory where checkpoints, logs, and other artifacts will be saved.
+  output_dir: "experiments/coral_mtl_b2_run"
+  
+  # Number of steps to accumulate gradients before performing an optimizer step.
+  gradient_accumulation_steps: 2
+  
+  # The key metric from the validation results used for selecting the best model.
+  # Should be 'H-Mean' for MTL models or a task-specific 'mIoU_{task_name}' for baselines.
+  model_selection_metric: "H-Mean"
+  
+  # --- Parameters for the SlidingWindowInferrer used during validation ---
+  # The step size for the sliding window. A stride of patch_size/2 creates 50% overlap.
+  inference_stride: 256
+  
+  # The number of patches to process in a single batch during validation inference.
+  inference_batch_size: 16
+
+# --------------------------------------------------------------------------
+# Configuration for the Evaluator Engine
+# --------------------------------------------------------------------------
+evaluator:
+  # Optional: Explicitly provide a path to a model checkpoint.
+  # If this is commented out or null, the factory will automatically find
+  # the 'best_model.pth' file inside the trainer.output_dir.
+  checkpoint_path: null
+
+  # Optional: Specify a dedicated directory for evaluation artifacts.
+  # If null, it defaults to a subfolder named 'evaluation' within trainer.output_dir.
+  output_dir: null
+  
+  # The number of qualitative result images to generate and save.
+  num_visualizations: 8
+
+# --------------------------------------------------------------------------
+# Configuration for the Optuna Hyperparameter Study
+# --------------------------------------------------------------------------
+study:
+  # A unique name for the study, used for the database file.
+  name: "coral_mtl_lr_alpha_study"
+  
+  # The SQLite database file for storing trial results. Allows resuming studies.
+  storage: "sqlite:///coral_mtl_main_study.db"
+  
+  # Path to the separate YAML file that defines the parameter search space.
+  # This keeps the main config clean and the search space reusable.
+  config_path: "configs/studies/search_space.yaml"
+  
+  # Total number of trials to run.
+  n_trials: 50
+  
+  # The direction for optimization. Must be 'maximize' or 'minimize'.
+  direction: "maximize"
+  
+  # Configuration for the pruner, which stops unpromising trials early.
+  pruner:
+    type: "MedianPruner"
+    params:
+      n_warmup_steps: 5 # Don't prune trials before this many epochs.
+      n_min_trials: 3   # Don't prune until at least this many trials are complete.
+

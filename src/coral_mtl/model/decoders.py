@@ -15,6 +15,85 @@ class MLP(nn.Module):
     def forward(self, x):
         return self.act(self.norm(self.proj(x)))
 
+
+class SegFormerMLPDecoder(nn.Module):
+    """
+    The standard All-MLP decoder from the SegFormer paper.
+
+    This decoder takes a list of multi-scale features from the encoder,
+    unifies their channel dimensions, upsamples them to a common resolution,
+    and fuses them into a single feature map.
+    """
+    def __init__(self,
+                 encoder_channels: List[int],
+                 decoder_channel: int,
+                 dropout_prob: float = 0.1):
+        """
+        Args:
+            encoder_channels (List[int]): A list of channel dimensions from the
+                four stages of the MiT encoder.
+            decoder_channel (int): The unified channel dimension for the decoder.
+            dropout_prob (float): The probability for the dropout layer.
+        """
+        super().__init__()
+        assert len(encoder_channels) == 4, "Requires features from 4 encoder stages."
+
+        # --- Step 1: Channel Unification MLPs ---
+        # Create a separate MLP for each encoder feature map to project it
+        # to the common decoder_channel dimension.
+        self.linear_c = nn.ModuleList([
+            MLP(input_dim=c, output_dim=decoder_channel) for c in encoder_channels
+        ])
+
+        # --- Step 2: Feature Fusion MLP ---
+        # This MLP takes the concatenated features (4 * decoder_channel) and
+        # fuses them back down to a single decoder_channel dimension.
+        self.linear_fuse = MLP(
+            input_dim=decoder_channel * 4,
+            output_dim=decoder_channel
+        )
+
+        # --- Step 3: Dropout Layer ---
+        self.dropout = nn.Dropout(dropout_prob)
+
+    def forward(self, features: List[torch.Tensor]) -> torch.Tensor:
+        """
+        Defines the forward pass for the decoder.
+
+        Args:
+            features (List[torch.Tensor]): A list of the 4 feature maps from the encoder.
+
+        Returns:
+            torch.Tensor: The final fused feature map of shape (B, C_decoder, H/4, W/4).
+        """
+        # The target spatial size is that of the first, largest feature map
+        target_size = features[0].shape[-2:]
+        
+        # Process each feature map: unify channels and upsample
+        processed_features = []
+        for i, feature in enumerate(features):
+            # Project to common channel dimension
+            proj_feature = self.linear_c[i](feature)
+            
+            # Upsample to the target size (H/4, W/4)
+            upsampled_feature = F.interpolate(
+                proj_feature,
+                size=target_size,
+                mode='bilinear',
+                align_corners=False
+            )
+            processed_features.append(upsampled_feature)
+
+        # Concatenate all features along the channel dimension
+        fused_features = torch.cat(processed_features, dim=1)
+        
+        # Fuse the concatenated features and apply dropout
+        fused_features = self.linear_fuse(fused_features)
+        fused_features = self.dropout(fused_features)
+
+        return fused_features
+
+
 # --- The Main Hierarchical Context-Aware Decoder ---
 class HierarchicalContextAwareDecoder(nn.Module):
     """
@@ -57,8 +136,8 @@ class HierarchicalContextAwareDecoder(nn.Module):
 
         # Asymmetric Decoder Heads
         self.decoders = nn.ModuleDict({
-            'panoptic_shape': MLP(fused_channels, decoder_channel),
-            'panoptic_health': MLP(fused_channels, decoder_channel),
+            'genus': MLP(fused_channels, decoder_channel),
+            'health': MLP(fused_channels, decoder_channel),
             'fish': nn.Conv2d(fused_channels, decoder_channel, kernel_size=1),
             'human_artifacts': nn.Conv2d(fused_channels, decoder_channel, kernel_size=1),
             'substrate': nn.Conv2d(fused_channels, decoder_channel, kernel_size=1)
