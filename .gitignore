@@ -3,6 +3,7 @@ pds_training_patches/
 seaview/
 models/
 dataset/
+.vscode/
 
 # Byte-compiled / optimized / DLL files
 *.pth

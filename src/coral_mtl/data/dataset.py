@@ -5,7 +5,6 @@ from PIL import Image
 from typing import Dict, Optional, List, Tuple
 from abc import ABC, abstractmethod
 from pathlib import Path
-import yaml
 from datasets import load_dataset
 
 # Correctly import from within the same package

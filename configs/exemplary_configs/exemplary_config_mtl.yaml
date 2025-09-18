@@ -23,7 +23,7 @@ model:
   # to determine the number of classes for each corresponding decoder head.
   tasks:
     primary: ["genus", "health"]
-    auxiliary: ["fish", "human_artifacts", "substrate"]
+    auxiliary: ["fish", "human_artifacts", "substrate", "background", "biota"]
 
 # ---
 # The data section is crucial because it points to the task definition file,

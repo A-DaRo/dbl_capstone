@@ -44,27 +44,60 @@ fish:
 human_artifacts:
   id2label:
     0: "unlabeled"
-    13: "human_artifacts"
+    13: "human"
+    14: "transect_tools"
+    15: "transect_line"
   mapping:
-    13: [7, 8, 15]
-
+    13: [7]
+    14: [8]
+    15: [15]  
 substrate:
   id2label:
     0: "unlabeled"
-    14: "substrate"
+    16: "seagrass"
+    17: "sand"
+    18: "algae_covered_substrate"
+    19: "unknown_hard_substrate"
+    20: "rubble"
   mapping:
-    14: [1, 5, 10, 12, 18]
+    16: [1]
+    17: [5]
+    18: [10]
+    19: [12]
+    20: [18]
 
 background:
   id2label:
     0: "unlabeled"
-    16: "background"
+    21: "background"
+    22: "dark"
   mapping:
-    16: [13, 14]
+    21: [13] 
+    22: [14]
 
 biota: 
   id2label:
     0: "unlabeled"
-    17: "biota"
+    23: "trash"
+    24: "other_animal"
+    25: "millepora"
+    26: "clam"
+    27: "sea_cucumber"
+    28: "turbinaria"
+    29: "sponge"
+    30: "anemone"
+    31: "sea_urchin"
+    32: "crown_of_thorn"
+    33: "dead_clam"
   mapping:
-    17: [2, 11, 21, 24, 26, 27, 29, 30, 35, 38, 39]
+    23: [2] 
+    24: [11] 
+    25: [21] 
+    26: [24]
+    27: [26]
+    28: [27]
+    29: [29]
+    30: [30] 
+    31: [35]
+    32: [38]
+    33: [39]

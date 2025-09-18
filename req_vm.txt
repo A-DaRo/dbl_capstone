@@ -11,4 +11,7 @@ transformers
 optuna 
 optuna-dashboard
 kaleido 
-accelerate 
+accelerate
+numba
+plotly
+pandas
