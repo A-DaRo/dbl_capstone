@@ -1,0 +1,87 @@
+# --- factory_config.yaml ---
+
+model:
+  # This flag tells the factory to build the BaselineSegformer.
+  type: "SegFormerBaseline"
+  params:
+    # Name of the SegFormer backbone.
+    backbone: "nvidia/mit-b2"
+    # Unified channel dimension for the standard MLP decoder.
+    decoder_channel: 256
+    # For a simple baseline, the number of output classes is specified directly.
+    num_classes: 40
+
+# --------------------------------------------------------------------------
+# Configuration for Datasets and DataLoaders
+# --------------------------------------------------------------------------
+data:
+  # The factory will first check if this is a valid local path. If not, it assumes
+  # it's a Hugging Face Hub dataset ID.
+  dataset_name: "./dataset/"
+
+  # Path to the pre-processed PDS-sampled training patches.
+  # This is prioritized for the 'train' split, as specified in dataset.py.
+  pds_train_path: "./dataset/processed/pds_patches/"
+  
+  # Path to the raw, full-image dataset. Used for 'val' and 'test' splits,
+  # and as a fallback for 'train' if pds_train_path is not found.
+  data_root_path: "./dataset/"
+
+  # The single source of truth for all class and task information.
+  # Required for MTL models and for non-MTL models being evaluated on MTL tasks.
+  task_definitions_path: "configs/baseline_comparisons/task_definitions_mtl_no_flattening.yaml"
+  
+  # Parameters for the final DataLoader object.
+  batch_size: 4
+  num_workers: 4
+  
+  # A fundamental parameter shared by datasets and augmentations.
+  patch_size: 512
+
+# --------------------------------------------------------------------------
+loss:
+  # This type corresponds to the CoralLoss class for baseline models.
+  type: "HybridLoss"
+  params:
+    # The main pixel-wise classification loss. Can be 'focal' or 'cross_entropy'.
+    primary_loss_type: "focal"
+    hybrid_alpha: 0.5
+    focal_gamma: 2.0
+    dice_smooth: 1.0
+    ignore_index: 0
+
+# --------------------------------------------------------------------------
+# Configuration for the Optimizer and LR Scheduler
+# --------------------------------------------------------------------------
+optimizer:
+  # This type is mapped to the `create_optimizer_and_scheduler` function.
+  type: "AdamWPolyDecay"
+
+  params:
+    lr: 6.0e-5
+    weight_decay: 0.01
+    adam_betas: [0.9, 0.999]
+    # The percentage of total training steps to use for the linear warmup phase.
+    warmup_ratio: 0.1
+    # The power of the polynomial for the learning rate decay.
+    power: 1.0
+
+metrics:
+  # This list is crucial. It tells both metrics calculators which tasks should
+  # be used to compute the Boundary IoU (BIoU) and the final H-Mean score.
+  # The names must match the task names in task_definitions.yaml.
+  primary_tasks: ["genus", "health"]
+  
+  # The thickness of the band (in pixels) used for BIoU calculation.
+  boundary_thickness: 2
+  
+  # The class index to be ignored during metric calculation.
+  # This should be consistent with the ignore_index in the loss function.
+  ignore_index: 0
+
+
+# --------------------------------------------------------------------------
+# The trainer section is needed to calculate total training steps for the scheduler.
+# --------------------------------------------------------------------------
+trainer:
+  epochs: 100
