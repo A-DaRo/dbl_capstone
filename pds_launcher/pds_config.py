@@ -5,7 +5,7 @@ Modify these parameters according to your dataset and requirements.
 """
 
 import os
-from Pathlib import Path
+from pathlib import Path
 
 project_root = Path(__file__).parent.parent
 # =============================================================================
