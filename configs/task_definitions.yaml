@@ -5,66 +5,116 @@
 genus:
   id2label:
     0: "unlabeled"
-    1: "other_coral"
-    2: "massive_meandering"
-    3: "branching"
-    4: "acropora"
-    5: "table_acropora"
-    6: "pocillopora"
-    7: "meandering"
-    8: "stylophora"
-  mapping:
-    1: [3, 4, 6]
-    2: [16, 17, 23]
-    3: [19, 20, 22]
-    4: [25]
-    5: [28, 32]
-    6: [31]
-    7: [33, 36, 37]
-    8: [34]
+    3: "other coral dead"
+    4: "other coral bleached"
+    6: "other coral alive"
+    16: "massive/meandering bleached"
+    17: "massive/meandering alive"
+    23: "massive/meandering dead"
+    19: "branching bleached"
+    20: "branching dead"
+    22: "branching alive"
+    25: "acropora alive"
+    28: "table acropora alive"
+    32: "table acropora dead"
+    31: "pocillopora alive"
+    33: "meandering bleached"
+    36: "meandering alive"
+    37: "meandering dead"
+    34: "stylophora alive"
+  groupby:
+    mapping:
+      0: 0
+      1: [3, 4, 6]          # other coral
+      2: [16, 17, 23]       # massive/meandering
+      3: [19, 20, 22]       # branching
+      4: [25]               # acropora
+      5: [28, 32]           # table acropora
+      6: [31]               # pocillopora
+      7: [33, 36, 37]       # meandering
+      8: [34]               # stylophora
+    id2label:
+      0: "unlabeled"
+      1: "other coral"
+      2: "massive/meandering"
+      3: "branching"
+      4: "acropora"
+      5: "table acropora"
+      6: "pocillopora"
+      7: "meandering"
+      8: "stylophora"
+
 
 health:
   id2label:
     0: "unlabeled"
-    9: "alive"
-    10: "bleached"
-    11: "dead"
-  mapping:
-    9: [6, 17, 22, 25, 28, 31, 34, 36]
-    10: [4, 16, 19, 33]
-    11: [3, 20, 23, 32, 37]
+    6: "other coral alive"
+    17: "massive/meandering alive"
+    22: "branching alive"
+    25: "acropora alive"
+    28: "table acropora alive"
+    31: "pocillopora alive"
+    34: "stylophora alive"
+    36: "meandering alive"
+    4: "other coral bleached"
+    16: "massive/meandering bleached"
+    19: "branching bleached"
+    33: "meandering bleached"
+    3: "other coral dead"
+    20: "branching dead"
+    23: "massive/meandering dead"
+    32: "table acropora dead"
+    37: "meandering dead"
+  groupby:
+    mapping:
+      0: 0
+      1: [6, 17, 22, 25, 28, 31, 34, 36]   # alive coral
+      2: [4, 16, 19, 33]                   # bleached coral
+      3: [3, 20, 23, 32, 37]               # dead coral
+    id2label:
+      0: "unlabeled"
+      1: "alive coral"
+      2: "bleached coral"
+      3: "dead coral"
 
 fish:
   id2label:
     0: "unlabeled"
-    12: "fish"
-  mapping:
-    12: [9]
+    9: "fish"
 
 human_artifacts:
   id2label:
     0: "unlabeled"
-    13: "human_artifacts"
-  mapping:
-    13: [7, 8, 15]
+    7: "human"
+    8: "transect tools"
+    15: "transect line"
 
 substrate:
   id2label:
     0: "unlabeled"
-    14: "substrate"
-  mapping:
-    14: [1, 5, 10, 12, 18]
+    1: "seagrass"
+    5: "sand"
+    10: "algae covered substrate"
+    12: "unknown hard substrate"
+    18: "rubble"
 
 background:
   id2label:
     0: "unlabeled"
-    16: "background"
-  mapping:
-    16: [13, 14]
+    13: "background"
+    14: "dark"
 
-biota: 
+biota:
   id2label:
     0: "unlabeled"
-    17: "biota"
-  mapping:
-    17: [2, 11, 21, 24, 26, 27, 29, 30, 35, 38, 39]
+    2: "trash"
+    11: "other animal"
+    21: "millepora"
+    24: "clam"
+    26: "sea cucumber"
+    27: "turbinaria"
+    29: "sponge"
+    30: "anemone"
+    35: "sea urchin"
+    38: "crown of thorn"
+    39: "dead clam"

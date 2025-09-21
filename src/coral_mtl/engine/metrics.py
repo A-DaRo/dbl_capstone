@@ -1,213 +1,207 @@
+"""
+Metrics calculation module for coral segmentation tasks.
+This module provides:
+    A hierarchical metrics calculation system that computes detailed per-class,
+    per-task (at grouped and ungrouped levels), and global metrics.
+"""
+
 import torch
 import numpy as np
-import yaml
-from typing import Dict, List, Union
+from typing import Dict, List, Any, Tuple
 from scipy.ndimage import binary_dilation
 from abc import ABC, abstractmethod
+from coral_mtl.utils.task_splitter import TaskSplitter
+
 
 EPS = 1e-6
+
 
 class AbstractCoralMetrics(ABC):
     """
     Abstract base class for calculating coral segmentation metrics.
-
-    This class provides the core, shared logic for computing mIoU, mPA, Boundary IoU,
-    and TIDE-style error analysis from accumulated confusion matrices. Subclasses
-    must implement the `__init__` and `update` methods to handle their specific
-    input formats (e.g., MTL dictionaries vs. single non-MTL tensors).
     """
     def __init__(self,
+                 splitter: TaskSplitter,
                  device: torch.device,
-                 primary_tasks: List[str],
                  boundary_thickness: int = 2,
                  ignore_index: int = 255):
+        self.splitter = splitter
         self.device = device
-        self.primary_tasks = primary_tasks
         self.boundary_thickness = boundary_thickness
         self.ignore_index = ignore_index
-
-        # These must be populated by the subclass's __init__ method
-        self.num_classes: Dict[str, int] = {}
-        self.all_tasks: List[str] = []
+        self.all_tasks = list(self.splitter.hierarchical_definitions.keys())
 
     def reset(self):
-        """Resets all accumulated statistics to zero."""
-        if not self.num_classes:
-            raise RuntimeError("Subclass must set self.num_classes before reset() is called.")
-        
-        self.confusion_matrices = {
-            task: torch.zeros((n, n), dtype=torch.int64, device=self.device)
-            for task, n in self.num_classes.items()
+        """Resets all accumulated statistics for a new epoch or run."""
+        self.task_cms = {
+            task: torch.zeros((len(details['ungrouped']['id2label']), len(details['ungrouped']['id2label'])),
+                              dtype=torch.int64, device=self.device)
+            for task, details in self.splitter.hierarchical_definitions.items()
         }
+        self.global_cm = torch.zeros((self.splitter.num_global_classes, self.splitter.num_global_classes),
+                                     dtype=torch.int64, device=self.device)
         self.biou_stats = {
-            task: {'intersection': 0.0, 'union': 0.0} for task in self.primary_tasks
+            task: {'ungrouped': {'intersection': 0.0, 'union': 0.0},
+                   'grouped': {'intersection': 0.0, 'union': 0.0} if details.get('is_grouped') else None}
+            for task, details in self.splitter.hierarchical_definitions.items()
         }
+        self.per_image_cms_buffer: List[Tuple[str, Dict[str, np.ndarray]]] = []
 
     @abstractmethod
-    def update(self, predictions: Union[torch.Tensor, Dict[str, torch.Tensor]],
-               targets: Union[torch.Tensor, Dict[str, torch.Tensor]]):
-        """
-        Abstract method to update internal statistics with a new batch.
-        Must be implemented by subclasses.
-        """
+    def update(self, predictions: Any, original_targets: torch.Tensor, image_ids: List[str]):
         pass
 
-    def _update_biou_stats(self, pred_np: np.ndarray, target_np: np.ndarray, task_name: str):
-        """Helper to compute and accumulate boundary stats for a batch."""
+    def _update_biou_stats(self, pred_np: np.ndarray, target_np: np.ndarray, task_name: str, level: str):
+        num_classes = len(self.splitter.hierarchical_definitions[task_name][level]['id2label'])
         for i in range(pred_np.shape[0]):
-            for c in range(1, self.num_classes[task_name]): # Ignore background class
+            for c in range(1, num_classes):
                 gt_c, pred_c = (target_np[i] == c), (pred_np[i] == c)
-                if not gt_c.any():
-                    continue
-
+                if not np.any(gt_c): continue
                 gt_boundary = binary_dilation(gt_c, iterations=self.boundary_thickness) & ~gt_c
                 pred_boundary = binary_dilation(pred_c, iterations=self.boundary_thickness) & ~pred_c
-                
-                self.biou_stats[task_name]['intersection'] += np.sum(gt_boundary & pred_boundary)
-                self.biou_stats[task_name]['union'] += np.sum(gt_boundary | pred_boundary)
+                self.biou_stats[task_name][level]['intersection'] += np.sum(gt_boundary & pred_boundary)
+                self.biou_stats[task_name][level]['union'] += np.sum(gt_boundary | pred_boundary)
 
-    def compute(self) -> Dict[str, float]:
-        """
-        Computes all final metrics from the accumulated statistics.
-        This implementation is shared across all subclasses.
-        """
-        results = {}
-        for task in self.all_tasks:
-            cm = self.confusion_matrices[task].cpu().numpy()
-            n_cls = self.num_classes[task]
-            
-            # Standard Metrics
-            tp = np.diag(cm)
-            fp = cm.sum(axis=0) - tp
-            fn = cm.sum(axis=1) - tp
-            
-            iou = tp / (tp + fp + fn + EPS)
-            pa = tp / (cm.sum(axis=1) + EPS)
-            
-            results[f'mIoU_{task}'] = np.nanmean(iou)
-            results[f'mPA_{task}'] = np.nanmean(pa)
-            
-            # Per-class IoU
-            for i in range(n_cls):
-                results[f'IoU_{task}_class_{i}'] = iou[i]
-            
-            # TIDE Error Analysis (implements spec for TIDE errors)
-            total_pixels = cm.sum() + EPS
-            if n_cls > 1:
-                foreground_cm = cm[1:, 1:]
-                cls_err = foreground_cm.sum() - np.diag(foreground_cm).sum()
-                bkg_err = cm[0, 1:].sum()
-                miss_err = cm[1:, 0].sum()
-
-                results[f'TIDE_ClsError_{task}'] = cls_err / total_pixels
-                results[f'TIDE_BkgError_{task}'] = bkg_err / total_pixels
-                results[f'TIDE_MissError_{task}'] = miss_err / total_pixels
-
-        for task in self.primary_tasks:
-            if task in self.biou_stats:
-                stats = self.biou_stats[task]
-                results[f'BIoU_{task}'] = stats['intersection'] / (stats['union'] + EPS)
-
-        # H-Mean Calculation (implements spec section 7.3.1)
-        h_mean_components = [results[f'mIoU_{task}'] for task in self.primary_tasks if f'mIoU_{task}' in results]
-        if len(h_mean_components) > 0:
-            results['H-Mean'] = sum(h_mean_components) / len(h_mean_components)
+    def _compute_metrics_from_cm(self, cm: np.ndarray, class_names: List[str]) -> Dict[str, Any]:
+        tp = np.diag(cm)
+        fp = cm.sum(axis=0) - tp
+        fn = cm.sum(axis=1) - tp
+        iou = tp / (tp + fp + fn + EPS)
+        precision = tp / (tp + fp + EPS)
+        recall = tp / (tp + fn + EPS)
+        f1_score = 2 * (precision * recall) / (precision + recall + EPS)
+        support = cm.sum(axis=1).astype(int)
         
-        return results
+        task_summary = {
+            'mIoU': np.nanmean(iou), 'mPrecision': np.nanmean(precision),
+            'mRecall': np.nanmean(recall), 'mF1-Score': np.nanmean(f1_score),
+            'pixel_accuracy': tp.sum() / (cm.sum() + EPS)
+        }
+        per_class = {name: {'IoU': iou[i], 'Precision': precision[i], 'Recall': recall[i],
+                            'F1-Score': f1_score[i], 'support': support[i]}
+                     for i, name in enumerate(class_names)}
+        
+        total_pixels = cm.sum() + EPS
+        tide = {}
+        if cm.shape[0] > 1:
+            foreground_cm = cm[1:, 1:]
+            tide = {
+                'classification_error': (foreground_cm.sum() - np.diag(foreground_cm).sum()) / total_pixels,
+                'background_error': cm[0, 1:].sum() / total_pixels,
+                'missed_error': cm[1:, 0].sum() / total_pixels
+            }
+        return {'task_summary': task_summary, 'per_class': per_class, 'TIDE_errors': tide}
+
+    def _aggregate_cm(self, fine_cm: np.ndarray, mapping: np.ndarray, num_grouped: int) -> np.ndarray:
+        grouped_cm = np.zeros((num_grouped, num_grouped), dtype=fine_cm.dtype)
+        for i in range(fine_cm.shape[0]):
+            for j in range(fine_cm.shape[1]):
+                grouped_cm[mapping[i], mapping[j]] += fine_cm[i, j]
+        return grouped_cm
+
+    def compute(self) -> Dict[str, Any]:
+        """Computes all final metrics from accumulated statistics and returns a structured report."""
+        report = {'tasks': {}, 'global_summary': {}, 'optimization_metrics': {}}
+        
+        # Per-Task Metrics
+        for task, details in self.splitter.hierarchical_definitions.items():
+            report['tasks'][task] = {}
+            cm_np = self.task_cms[task].cpu().numpy()
+            
+            for level in ['ungrouped', 'grouped']:
+                if level == 'grouped' and not details.get('is_grouped'): continue
+                
+                level_cm = self._aggregate_cm(cm_np, details['ungrouped_to_grouped_map'], len(details[level]['id2label'])) if level == 'grouped' else cm_np
+                level_report = self._compute_metrics_from_cm(level_cm, details[level]['class_names'])
+                stats = self.biou_stats[task][level]
+                level_report['BIoU'] = stats['intersection'] / (stats['union'] + EPS)
+                report['tasks'][task][level] = level_report
+                report['optimization_metrics'][f'tasks.{task}.{level}.mIoU'] = level_report['task_summary']['mIoU']
+                report['optimization_metrics'][f'tasks.{task}.{level}.BIoU'] = level_report['BIoU']
+        
+        # Global Metrics
+        global_cm_np = self.global_cm.cpu().numpy()
+        report['global_summary'] = self._compute_metrics_from_cm(global_cm_np, self.splitter.global_class_names)
+        report['optimization_metrics']['global.mIoU'] = report['global_summary']['task_summary']['mIoU']
+
+        return report
 
 class CoralMTLMetrics(AbstractCoralMetrics):
-    """
-    Metrics calculator for Multi-Task Learning models.
-    Expects predictions and targets as dictionaries mapping task names to tensors.
-    """
-    def __init__(self,
-                 num_classes: Dict[str, int],
-                 device: torch.device,
-                 primary_tasks: List[str],
-                 **kwargs):
-        super().__init__(device=device, primary_tasks=primary_tasks, **kwargs)
-        self.num_classes = num_classes
-        self.all_tasks = list(num_classes.keys())
-        self.reset()
-
-    def update(self, predictions: Dict[str, torch.Tensor], targets: Dict[str, torch.Tensor]):
+    """Metrics calculator for Multi-Task Learning models."""
+    def update(self, predictions: Dict[str, torch.Tensor], original_targets: torch.Tensor, image_ids: List[str]):
         preds = {task: torch.argmax(logits, dim=1) for task, logits in predictions.items()}
+        mask = (original_targets != self.ignore_index)
         
-        for task in self.all_tasks:
-            pred_task, target_task = preds[task], targets[task]
-            n_cls = self.num_classes[task]
+        batch_size = original_targets.shape[0]
+        global_target = self.splitter.global_mapping_torch.to(self.device)[original_targets]
 
-            mask = (target_task != self.ignore_index)
-            cm_update = torch.bincount(
-                n_cls * target_task[mask].long() + pred_task[mask].long(),
-                minlength=n_cls**2
-            ).reshape(n_cls, n_cls)
-            self.confusion_matrices[task] += cm_update.to(self.device)
+        for i in range(batch_size):
+            img_id = image_ids[i]
+            img_mask = mask[i]
+            per_image_cms = {}
 
-            if task in self.primary_tasks:
-                self._update_biou_stats(pred_task.cpu().numpy(), target_task.cpu().numpy(), task)
+            # Update per-task CMs
+            for task, details in self.splitter.hierarchical_definitions.items():
+                mapping = torch.from_numpy(details['ungrouped']['mapping_array']).to(self.device)
+                target_ungrouped = mapping[original_targets[i]]
+                pred_ungrouped = preds[task][i]
+                
+                n_cls = len(details['ungrouped']['id2label'])
+                cm_update = torch.bincount(
+                    n_cls * target_ungrouped[img_mask].long() + pred_ungrouped[img_mask].long(),
+                    minlength=n_cls**2).reshape(n_cls, n_cls)
+                self.task_cms[task] += cm_update
+                per_image_cms[task] = cm_update.cpu().numpy()
+
+            # Update Global CM
+            pred_fg = torch.zeros_like(original_targets[i], dtype=torch.long)
+            for p in preds.values():
+                pred_fg |= (p[i] > 0)
+            global_pred = pred_fg * self.splitter.global_mapping_torch.to(self.device)[original_targets[i]]
+
+            n_cls_global = self.splitter.num_global_classes
+            global_cm_update = torch.bincount(
+                n_cls_global * global_target[i][img_mask].long() + global_pred[img_mask].long(),
+                minlength=n_cls_global**2).reshape(n_cls_global, n_cls_global)
+            self.global_cm += global_cm_update
+            per_image_cms['global'] = global_cm_update.cpu().numpy()
+            
+            self.per_image_cms_buffer.append((img_id, per_image_cms))
 
 class CoralMetrics(AbstractCoralMetrics):
-    """
-    Metrics calculator for single-task (non-MTL) models.
-    
-    This class takes a single prediction tensor and "un-flattens" it into a
-    multi-task structure using a provided task definitions dictionary, allowing for
-    a direct, apples-to-apples comparison with MTL models.
-    """
-    def __init__(self,
-                 task_definitions: Dict,
-                 device: torch.device,
-                 primary_tasks: List[str],
-                 **kwargs):
-        super().__init__(device=device, primary_tasks=primary_tasks, **kwargs)
+    """Metrics calculator for baseline (single-head) models."""
+    def update(self, predictions: torch.Tensor, original_targets: torch.Tensor, image_ids: List[str]):
+        flat_preds = torch.argmax(predictions, dim=1)
+        mask = (original_targets != self.ignore_index)
         
-        self.num_classes = {}
-        self.per_task_luts = {}
-        self.all_tasks = list(task_definitions.keys())
+        original_preds = self.splitter.flat_to_original_mapping_torch.to(self.device)[flat_preds]
+        global_target = self.splitter.global_mapping_torch.to(self.device)[original_targets]
+        global_pred = self.splitter.global_mapping_torch.to(self.device)[original_preds]
         
-        # Find the max global class ID to determine LUT size
-        max_global_id = 0
-        for details in task_definitions.values():
-            # The keys of the 'mapping' are the new IDs for the flattened mask.
-            # We need to find the highest value among them to size the LUT correctly.
-            # Note: these are stored as strings in the YAML, so we must cast to int.
-            all_new_ids = [int(k) for k in details.get('mapping', {}).keys()]
-            if all_new_ids:
-                max_global_id = max(max_global_id, max(all_new_ids))
+        batch_size = original_targets.shape[0]
+        for i in range(batch_size):
+            img_id = image_ids[i]
+            img_mask = mask[i]
+            per_image_cms = {}
 
-        for task_name, details in task_definitions.items():
-            self.num_classes[task_name] = len(details['id2label'])
+            # Update per-task CMs
+            for task, details in self.splitter.hierarchical_definitions.items():
+                mapping = torch.from_numpy(details['ungrouped']['mapping_array']).to(self.device)
+                target_ungrouped = mapping[original_targets[i]]
+                pred_ungrouped = mapping[original_preds[i]]
+                n_cls = len(details['ungrouped']['id2label'])
+                cm_update = torch.bincount(
+                    n_cls * target_ungrouped[img_mask].long() + pred_ungrouped[img_mask].long(),
+                    minlength=n_cls**2).reshape(n_cls, n_cls)
+                self.task_cms[task] += cm_update
+                per_image_cms[task] = cm_update.cpu().numpy()
+
+            # Update Global CM
+            n_cls_global = self.splitter.num_global_classes
+            global_cm_update = torch.bincount(
+                n_cls_global * global_target[i][img_mask].long() + global_pred[i][img_mask].long(),
+                minlength=n_cls_global**2).reshape(n_cls_global, n_cls_global)
+            self.global_cm += global_cm_update
+            per_image_cms['global'] = global_cm_update.cpu().numpy()
             
-            # Create a lookup table (LUT) to map global IDs to task-local IDs
-            lut = torch.zeros(max_global_id + 1, dtype=torch.long, device=self.device)
-            for new_id_str, old_ids_list in details.get('mapping', {}).items():
-                local_id = int(new_id_str)
-                # Map all original class IDs to the new task-local ID
-                for old_id in old_ids_list:
-                   if old_id < len(lut): lut[old_id] = local_id
-
-            self.per_task_luts[task_name] = lut
-            
-        self.reset()
-
-    def update(self, predictions: torch.Tensor, targets: torch.Tensor):
-        preds = torch.argmax(predictions, dim=1)
-        
-        for task_name in self.all_tasks:
-            n_cls = self.num_classes[task_name]
-            lut = self.per_task_luts[task_name]
-            
-            # Apply LUT to "un-flatten" the global masks to task-specific masks
-            pred_task = lut[preds]
-            target_task = lut[targets]
-
-            mask = (targets != self.ignore_index) # Use original target for ignore mask
-            cm_update = torch.bincount(
-                n_cls * target_task[mask].long() + pred_task[mask].long(),
-                minlength=n_cls**2
-            ).reshape(n_cls, n_cls)
-            self.confusion_matrices[task_name] += cm_update.to(self.device)
-
-            if task_name in self.primary_tasks:
-                self._update_biou_stats(pred_task.cpu().numpy(), target_task.cpu().numpy(), task_name)
+            self.per_image_cms_buffer.append((img_id, per_image_cms))

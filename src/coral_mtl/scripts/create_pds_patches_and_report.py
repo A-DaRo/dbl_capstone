@@ -6,9 +6,9 @@ from typing import Optional
 # Direct imports from the other pipeline scripts
 # This assumes the script is run from the project's root directory,
 # so the 'scripts' directory is on the Python path.
-from create_pds_dataset import create_pds_dataset
-from analyze_patch_distribution import analyze_distribution
-from compare_distributions import compare_and_visualize
+from .create_pds_dataset import create_pds_dataset
+from .analyze_patch_distribution import analyze_distribution
+from .compare_distributions import compare_and_visualize
 
 def create_pds_patches_and_report(
     dataset_root: Path,
@@ -38,26 +38,26 @@ def create_pds_patches_and_report(
     print("--- Finished: Step 1 ---")
 
     # --- Step 2: Analyze the distribution of the newly created patch dataset ---
-    print("\n--- Running: Step 2 - Analyze Patch Distribution ---")
-    pds_analysis_out_dir = analysis_output_dir / "pds_analysis"
-    pds_analysis_out_dir.mkdir(parents=True, exist_ok=True) # Ensure output dir exists
-    analyze_distribution(
-        patch_dir=pds_output_dir,
-        output_dir=pds_analysis_out_dir
-    )
-    print("--- Finished: Step 2 ---")
-
-    # --- Step 3: Compare the new distribution against the original dataset ---
-    print("\n--- Running: Step 3 - Compare Distributions ---")
-    comparison_out_dir = analysis_output_dir / "comparison_results"
-    comparison_out_dir.mkdir(parents=True, exist_ok=True) # Ensure output dir exists
-    compare_and_visualize(
-        original_dataset_root=dataset_root,
-        pds_patch_dir=pds_output_dir,
-        output_dir=comparison_out_dir,
-        task_definition_path=task_definition_path
-    )
-    print("--- Finished: Step 3 ---")
+#    print("\n--- Running: Step 2 - Analyze Patch Distribution ---")
+#    pds_analysis_out_dir = analysis_output_dir / "pds_analysis"
+#    pds_analysis_out_dir.mkdir(parents=True, exist_ok=True) # Ensure output dir exists
+#    analyze_distribution(
+#        patch_dir=pds_output_dir,
+#        output_dir=pds_analysis_out_dir
+#    )
+#    print("--- Finished: Step 2 ---")
+#
+#    # --- Step 3: Compare the new distribution against the original dataset ---
+#    print("\n--- Running: Step 3 - Compare Distributions ---")
+#    comparison_out_dir = analysis_output_dir / "comparison_results"
+#    comparison_out_dir.mkdir(parents=True, exist_ok=True) # Ensure output dir exists
+#    compare_and_visualize(
+#        original_dataset_root=dataset_root,
+#        pds_patch_dir=pds_output_dir,
+#        output_dir=comparison_out_dir,
+#        task_definition_path=task_definition_path
+#    )
+#    print("--- Finished: Step 3 ---")
 
     print("\n--- Coral-MTL Data Pipeline Orchestration Complete ---")
     print(f"All outputs can be found in '{pds_output_dir}' and '{analysis_output_dir}'.")

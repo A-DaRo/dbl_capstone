@@ -7,7 +7,10 @@ import torch
 import torch.nn as nn
 from torch.optim import Optimizer
 from types import SimpleNamespace
-from typing import Dict, Any, Optional, Tuple
+import torch
+import os
+import yaml
+from typing import Dict, Any, Optional, Tuple, List
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -20,12 +23,13 @@ from .engine.losses import CoralMTLLoss, CoralLoss
 from .engine.metrics import AbstractCoralMetrics, CoralMTLMetrics, CoralMetrics
 from .engine.trainer import Trainer
 from .engine.evaluator import Evaluator
-from .utils.visualization import Visualizer
-
+from .utils.task_splitter import MTLTaskSplitter, BaseTaskSplitter
+from .utils.metrics_storer import MetricsStorer 
 
 class ExperimentFactory:
     """
     The master factory and orchestrator for all experimental workflows.
+    It handles dependency injection for all major components.
     """
 
     def __init__(self, config_path: str = None, config_dict: Dict = None):
@@ -47,39 +51,37 @@ class ExperimentFactory:
         else:
             raise ValueError("Either 'config_path' or 'config_dict' must be provided.")
 
-        # --- Initialize internal caches ---
+        # --- Initialize caches ---
+        self.task_splitter = None
         self.model = None
-        self.task_info = {} # Will store pre-parsed info from task_definitions.yaml
+        self.dataloaders = None
+        self.optimizer = None
+        self.scheduler = None
+        self.loss_fn = None
+        self.metrics_calculator = None
+        self.metrics_storer = None
 
-        # --- Pre-process linked configurations ---
-        self._parse_task_definitions()
+        # --- Centralized Task Definition Parsing ---
+        self._initialize_task_splitter()
 
-    def _parse_task_definitions(self):
-        """
-        A private helper to load and parse the task_definitions.yaml file.
-        This centralizes the logic for understanding the hierarchical task structure
-        and makes the class counts and label mappings available to all other factory methods.
-        """
+    def _initialize_task_splitter(self):
+        """Instantiates the correct TaskSplitter based on the config."""
+        if self.task_splitter: return
+
         task_def_path = self.config.get('data', {}).get('task_definitions_path')
         if not task_def_path:
-            return  # No task file specified, nothing to do.
+            raise ValueError("'task_definitions_path' is required in the data config.")
 
         with open(task_def_path, 'r') as f:
             task_definitions = yaml.safe_load(f)
-
-        # Store the full task definitions, number of classes, and id2label mappings.
-        self.task_info['definitions'] = task_definitions
-
-        num_classes_per_task = {}
-        id2label_per_task = {}
-        for task_name, details in task_definitions.items():
-            # Ensure keys are integers for proper indexing
-            id2label = {int(k): v for k, v in details['id2label'].items()}
-            num_classes_per_task[task_name] = len(id2label)
-            id2label_per_task[task_name] = id2label
-
-        self.task_info['num_classes'] = num_classes_per_task
-        self.task_info['id2label'] = id2label_per_task
+        
+        model_type = self.config.get('model', {}).get('type')
+        if model_type == "CoralMTL":
+            self.task_splitter = MTLTaskSplitter(task_definitions)
+        elif model_type == "SegFormerBaseline":
+            self.task_splitter = BaseTaskSplitter(task_definitions)
+        else:
+            raise ValueError(f"Unsupported model type '{model_type}' for TaskSplitter initialization.")
 
     def get_model(self) -> torch.nn.Module:
         """
@@ -97,52 +99,32 @@ class ExperimentFactory:
         if self.model is not None:
             return self.model
 
-        # 2. Read model configuration
         model_config = self.config.get('model', {})
         model_type = model_config.get('type')
-        if not model_type:
-            raise ValueError("Model 'type' not specified in the configuration file.")
-
         params = model_config.get('params', {})
         print(f"--- Building model of type: {model_type} ---")
 
-        # 3. Instantiate the correct model based on its type
         if model_type == "CoralMTL":
-            # For the MTL model, we dynamically assemble its parameters
-            tasks_config = model_config.get('tasks', {})
-            primary_tasks = tasks_config.get('primary', [])
-            aux_tasks = tasks_config.get('auxiliary', [])
-            
-            # Get the number of classes for each task from the pre-parsed info
-            num_classes_dict = self.task_info.get('num_classes')
-            if not num_classes_dict:
-                raise ValueError(
-                    "CoralMTL model requires 'task_definitions_path' to be set in "
-                    "the data config to determine the number of classes for each head."
-                )
-
-            model = CoralMTLModel(
+            # For MTL, num_classes for each head comes from the splitter
+            num_classes_dict = {
+                task: len(details['ungrouped']['id2label']) 
+                for task, details in self.task_splitter.hierarchical_definitions.items()
+            }
+            self.model = CoralMTLModel(
                 encoder_name=params['backbone'],
                 decoder_channel=params['decoder_channel'],
                 num_classes=num_classes_dict,
                 attention_dim=params['attention_dim'],
-                primary_tasks=primary_tasks,
-                aux_tasks=aux_tasks
+                primary_tasks=model_config.get('tasks', {}).get('primary', []),
+                aux_tasks=model_config.get('tasks', {}).get('auxiliary', [])
             )
-
         elif model_type == "SegFormerBaseline":
-            # The baseline model has a simpler, static configuration
-            model = BaselineSegformer(
+            # For baseline, num_classes is the size of the flattened space
+            self.model = BaselineSegformer(
                 encoder_name=params['backbone'],
                 decoder_channel=params['decoder_channel'],
-                num_classes=params['num_classes']
+                num_classes=len(self.task_splitter.flat_id2label)
             )
-            
-        else:
-            raise ValueError(f"Unknown model type '{model_type}' specified in config.")
-
-        # 4. Cache and return the model
-        self.model = model
         return self.model
     
     def get_dataloaders(self) -> Dict[str, DataLoader]:
@@ -157,8 +139,7 @@ class ExperimentFactory:
             Dict[str, DataLoader]: A dictionary containing 'train', 'val', and 'test' loaders.
         """
         # 1. Check cache first
-        if hasattr(self, 'dataloaders') and self.dataloaders:
-            return self.dataloaders
+        if self.dataloaders: return self.dataloaders
 
         print("--- Building dataloaders ---")
         data_config = self.config.get('data', {})
@@ -173,69 +154,27 @@ class ExperimentFactory:
             jitter_params=aug_config.get('jitter_params')
         )
 
-        # 3. Determine data source (HF Hub vs. Local)
-        # The AbstractCoralscapesDataset will handle the logic internally.
-        dataset_name = data_config.get('dataset_name')
-        if os.path.isdir(dataset_name):
-            # It's a local path, so we don't pass an hf_dataset_name
-            hf_dataset_name = None
-            # The local path could be either the raw data root or the PDS root
-            # but dataset.py expects specific path variables. We provide both.
-            data_root_path = data_config.get('data_root_path')
-            pds_train_path = data_config.get('pds_train_path')
-        else:
-            # It's not a valid directory, so assume it's an HF Hub ID.
-            hf_dataset_name = dataset_name
-            data_root_path = None
-            pds_train_path = None
-            
-        # 4. Prepare shared arguments for all dataset splits
-        shared_dataset_args = {
-            'patch_size': data_config.get('patch_size', 512),
-            'hf_dataset_name': hf_dataset_name,
-            'data_root_path': data_root_path,
-            'pds_train_path': pds_train_path,
-        }
-
-        # 5. Determine which Dataset class to use
-        if model_type == "CoralMTL":
-            DatasetClass = CoralscapesMTLDataset
-            # The MTL dataset requires the parsed task definitions
-            specific_args = {'task_definitions': self.task_info.get('definitions')}
-        elif model_type == "SegFormerBaseline":
-            DatasetClass = CoralscapesDataset
-            # The baseline dataset can optionally take the definitions for flattening
-            specific_args = {'task_definitions': self.task_info.get('definitions')}
-        else:
-            raise ValueError(f"Dataloader factory cannot handle unknown model type '{model_type}'.")
-
-        # 6. Create datasets and dataloaders for each split
+        DatasetClass = CoralscapesMTLDataset if model_type == "CoralMTL" else CoralscapesDataset
+        
         self.dataloaders = {}
-        for split in ['train', 'val', 'test']:
-            # Use augmentations only for the training split
+        for split in ['train', 'validation', 'test']:
             augs = train_augmentations if split == 'train' else None
-            
-            # Map 'val' and 'test' splits to Hugging Face's 'validation' and 'test'
-            hf_split_name = 'validation' if split == 'val' else split
-
             dataset = DatasetClass(
-                split=hf_split_name,
+                splitter=self.task_splitter,
+                split=split,
                 augmentations=augs,
-                **shared_dataset_args,
-                **specific_args
+                patch_size=data_config.get('patch_size', 512),
+                hf_dataset_name=data_config.get('dataset_name'),
+                data_root_path=data_config.get('data_root_path'),
+                pds_train_path=data_config.get('pds_train_path')
             )
-            
-            # Use shuffle only for the training dataloader
-            shuffle = (split == 'train')
-            
             self.dataloaders[split] = DataLoader(
                 dataset,
-                batch_size=data_config.get('batch_size', 4),
-                shuffle=shuffle,
+                batch_size=data_config.get('batch_size_per_gpu', 4),
+                shuffle=(split == 'train'),
                 num_workers=data_config.get('num_workers', 4),
                 pin_memory=True
             )
-            
         return self.dataloaders
     
     def get_optimizer_and_scheduler(self) -> Tuple[Optimizer, Any]:
@@ -367,60 +306,36 @@ class ExperimentFactory:
         Returns:
             AbstractCoralMetrics: The instantiated metrics calculator object.
         """
-        # 1. Check cache first
-        if hasattr(self, 'metrics_calculator') and self.metrics_calculator:
-            return self.metrics_calculator
+        if self.metrics_calculator: return self.metrics_calculator
 
         print("--- Building metrics calculator ---")
         metrics_config = self.config.get('metrics', {})
         model_type = self.config.get('model', {}).get('type')
-        if not model_type:
-            raise ValueError("Model 'type' must be specified to build the correct metrics calculator.")
+        device = torch.device(self.config.get('trainer', {}).get('device', 'cpu'))
 
-        # 2. Prepare shared parameters common to both calculator classes
-        # A real implementation might get the device from a central property.
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        
         shared_params = {
+            'splitter': self.task_splitter,
             'device': device,
-            'primary_tasks': metrics_config.get('primary_tasks', []),
             'boundary_thickness': metrics_config.get('boundary_thickness', 2),
-            'ignore_index': metrics_config.get('ignore_index', 255)
+            'ignore_index': self.config.get('data', {}).get('ignore_index', 255)
         }
 
-        # 3. Instantiate the correct metrics class based on the model type
         if model_type == "CoralMTL":
-            num_classes_dict = self.task_info.get('num_classes')
-            if not num_classes_dict:
-                 raise ValueError(
-                    "CoralMTLMetrics requires 'task_definitions_path' to be set in the "
-                    "data config so the factory can determine class counts."
-                 )
-            
-            metrics_calculator = CoralMTLMetrics(
-                num_classes=num_classes_dict,
-                **shared_params
-            )
-
+            self.metrics_calculator = CoralMTLMetrics(**shared_params)
         elif model_type == "SegFormerBaseline":
-            task_definitions = self.task_info.get('definitions')
-            if not task_definitions:
-                raise ValueError(
-                    "CoralMetrics (for baseline models) requires 'task_definitions_path' "
-                    "to be set in the data config for hierarchical evaluation."
-                )
-
-            metrics_calculator = CoralMetrics(
-                task_definitions=task_definitions,
-                **shared_params
-            )
-            
-        else:
-            raise ValueError(f"Unknown model type '{model_type}' for metrics calculator.")
+            self.metrics_calculator = CoralMetrics(**shared_params)
         
-        # 4. Cache and return the instantiated object
-        self.metrics_calculator = metrics_calculator
         return self.metrics_calculator
+
+    def get_metrics_storer(self) -> MetricsStorer:
+        """Builds the MetricsStorer for handling results persistence."""
+        if self.metrics_storer: return self.metrics_storer
+        
+        print("--- Building metrics storer ---")
+        output_dir = self.config.get('trainer', {}).get('output_dir', 'experiments/default_run')
+        self.metrics_storer = MetricsStorer(output_dir)
+        return self.metrics_storer
+
 
     def run_training(self, trial: Optional[optuna.Trial] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """
@@ -451,50 +366,40 @@ class ExperimentFactory:
         
         print("2/4: Assembling dataloaders...")
         dataloaders = self.get_dataloaders()
-        train_loader = dataloaders['train']
-        val_loader = dataloaders['val']
+
         
         print("3/4: Assembling optimizer, scheduler, loss, and metrics...")
         optimizer, scheduler = self.get_optimizer_and_scheduler()
         loss_fn = self.get_loss_function()
         metrics_calculator = self.get_metrics_calculator()
+        metrics_storer = self.get_metrics_storer()
 
         # 2. Prepare the trainer-specific configuration object.
-        #    The Trainer class expects an object with attribute access (e.g., config.DEVICE),
-        #    so we convert the dictionary from our YAML into a SimpleNamespace.
-        trainer_config_dict = self.config.get('trainer', {})
-        if 'device' not in trainer_config_dict or trainer_config_dict['device'] == 'auto':
-            trainer_config_dict['device'] = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # --- Prepare configuration object for the Trainer ---
+        trainer_config = SimpleNamespace(**self.config.get('trainer', {}))
+        if trainer_config.device == 'auto':
+            trainer_config.device = "cuda" if torch.cuda.is_available() else "cpu"
         
-        # Add patch_size for the inferrer, it's a data-level config but needed by trainer
-        trainer_config_dict['PATCH_SIZE'] = self.config.get('data', {}).get('patch_size', 512)
+        # Inject other required configs
+        trainer_config.patch_size = self.config.get('data', {}).get('patch_size', 512)
         
-        trainer_config = SimpleNamespace(**trainer_config_dict)
 
-        # 3. Instantiate the dedicated Trainer class.
-        #    The factory's job is to build and provide all dependencies.
-        print("4/4: Initializing the training engine...")
+         # --- Instantiate and run the Trainer ---
         trainer = Trainer(
             model=model,
-            train_loader=train_loader,
-            val_loader=val_loader,
+            train_loader=dataloaders['train'],
+            val_loader=dataloaders['validation'],
             loss_fn=loss_fn,
             metrics_calculator=metrics_calculator,
+            metrics_storer=metrics_storer,
             optimizer=optimizer,
             scheduler=scheduler,
             config=trainer_config,
             trial=trial
         )
         
-        # 4. Delegate control to the Trainer's main `train` method.
-        #    The Trainer now manages the entire stateful training loop.
-        best_metric, training_log, validation_log = trainer.train()
+        trainer.train()
 
-        print("\n--- Training Workflow Complete ---")
-        print(f"Best validation metric ({trainer_config.model_selection_metric}): {best_metric:.4f}")
-        
-        # 5. Return the results for potential further processing.
-        return training_log, validation_log
     
     def run_evaluation(self, checkpoint_path: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -517,62 +422,47 @@ class ExperimentFactory:
         print(">>> Starting Evaluation Workflow <<<")
         print("="*50)
 
-        # 1. Assemble the high-level components required by the Evaluator.
-        print("1/3: Assembling model, test data, and metrics calculator...")
+        # --- Assemble components for evaluation ---
         model = self.get_model()
         test_loader = self.get_dataloaders()['test']
         metrics_calculator = self.get_metrics_calculator()
-
-        # 2. Prepare the unified configuration object for the Evaluator.
-        #    The Evaluator class expects a single config object with attribute access.
-        #    We aggregate parameters from different sections of our main YAML file.
-        trainer_config = self.config.get('trainer', {})
-        evaluator_config = self.config.get('evaluator', {})
+        metrics_storer = self.get_metrics_storer()
         
-        # --- Determine the final checkpoint path with clear priority ---
-        # Priority 1: Direct argument to this method.
-        # Priority 2: Path specified in the evaluator config section.
-        # Priority 3: Auto-detect 'best_model.pth' in the trainer output directory.
-        final_checkpoint_path = checkpoint_path or evaluator_config.get('checkpoint_path')
+        # --- Prepare configuration object for the Evaluator ---
+        trainer_config = self.config.get('trainer', {})
+        eval_config_dict = self.config.get('evaluator', {})
+        
+        # Determine checkpoint path with clear priority
+        final_checkpoint_path = checkpoint_path or eval_config_dict.get('checkpoint_path')
         if not final_checkpoint_path:
             exp_dir = trainer_config.get('output_dir')
-            if not exp_dir:
-                raise ValueError("Cannot auto-detect checkpoint. 'trainer.output_dir' is not set.")
+            if not exp_dir: raise ValueError("Cannot auto-detect checkpoint. 'trainer.output_dir' is not set.")
             final_checkpoint_path = os.path.join(exp_dir, "best_model.pth")
-            if not os.path.exists(final_checkpoint_path):
-                raise FileNotFoundError(f"Could not auto-detect checkpoint at {final_checkpoint_path}")
         
-        # --- Determine the final output directory ---
-        eval_output_dir = evaluator_config.get('output_dir')
-        if not eval_output_dir:
-            eval_output_dir = os.path.join(trainer_config.get('output_dir', '.'), 'evaluation')
+        # Determine output directory
+        eval_output_dir = eval_config_dict.get('output_dir') or os.path.join(trainer_config.get('output_dir', '.'), 'evaluation')
 
-        eval_config_dict = {
-            'DEVICE': trainer_config.get('device', 'auto'),
-            'CHECKPOINT_PATH': final_checkpoint_path,
-            'OUTPUT_DIR': eval_output_dir,
-            'PATCH_SIZE': self.config.get('data', {}).get('patch_size', 512),
-            'INFERENCE_STRIDE': trainer_config.get('inference_stride', 256),
-            'INFERENCE_BATCH_SIZE': trainer_config.get('inference_batch_size', 16),
-            'NUM_VISUALIZATIONS': evaluator_config.get('num_visualizations', 8),
-            'PRIMARY_TASKS': self.config.get('metrics', {}).get('primary_tasks', [])
-        }
-        eval_config = SimpleNamespace(**eval_config_dict)
+        eval_config = SimpleNamespace(
+            device=trainer_config.get('device', 'auto'),
+            checkpoint_path=final_checkpoint_path,
+            output_dir=eval_output_dir,
+            patch_size=self.config.get('data', {}).get('patch_size', 512),
+            inference_stride=eval_config_dict.get('inference_stride', 256),
+            inference_batch_size=eval_config_dict.get('inference_batch_size', 16),
+        )
+        if eval_config.device == 'auto':
+            eval_config.device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        # 3. Instantiate the dedicated Evaluator class.
-        print(f"2/3: Initializing the evaluation engine...")
+        # --- Instantiate and run the Evaluator ---
         evaluator = Evaluator(
             model=model,
             test_loader=test_loader,
             metrics_calculator=metrics_calculator,
+            metrics_storer=metrics_storer,
             config=eval_config
         )
-
-        # 4. Delegate control to the Evaluator's main `evaluate` method.
-        print(f"3/3: Running evaluation...")
+        
         final_metrics = evaluator.evaluate()
-
-        print("\n--- Evaluation Workflow Complete ---")
         return final_metrics
     
     def run_hyperparameter_study(self):
@@ -666,147 +556,3 @@ class ExperimentFactory:
         print("Best hyperparameters found:")
         for key, value in best_trial.params.items():
             print(f"  - {key}: {value}")
-
-    def generate_visualizations(
-        self,
-        training_log: Optional[Dict[str, Any]] = None,
-        validation_log: Optional[Dict[str, Any]] = None,
-        evaluation_results: Optional[Dict[str, Any]] = None
-    ):
-        """
-        Produces all analytical plots and qualitative result images for a trained model.
-
-        This method is highly flexible. It can generate plots from pre-existing log
-        files passed as arguments, or it can orchestrate a new inference run to
-        generate the data it needs for qualitative and confusion matrix plots.
-
-        Args:
-            training_log (Optional[Dict]): The training history log from `run_training`.
-            validation_log (Optional[Dict]): The validation history log from `run_training`.
-            evaluation_results (Optional[Dict]): The final results dict from `run_evaluation`.
-                                                 Expected to contain confusion matrices.
-        """
-        print("\n" + "="*50)
-        print(">>> Starting Visualization Workflow <<<")
-        print("="*50)
-        
-        vis_config = self.config.get('visualizer', {})
-        trainer_config = self.config.get('trainer', {})
-        output_dir = trainer_config.get('output_dir', 'experiments/default_run')
-
-        # 1. Instantiate the Visualizer engine.
-        visualizer = Visualizer(
-            output_dir=output_dir,
-            task_info=self.task_info,
-            style=vis_config.get('style', 'seaborn-v0_8-whitegrid')
-        )
-        print(f"Visualizations will be saved to: {output_dir}")
-
-        # 2. Generate plots from provided training/validation logs.
-        if training_log:
-            print("Generating plots from training logs...")
-            warmup_ratio = self.config.get('optimizer', {}).get('params', {}).get('warmup_ratio', 0.1)
-            total_steps = len(training_log.get('lr', []))
-            warmup_steps = int(total_steps * warmup_ratio)
-            
-            visualizer.plot_training_losses(training_log, filename="training_losses.png")
-            visualizer.plot_learning_rate(training_log, warmup_steps, filename="learning_rate.png")
-            visualizer.plot_uncertainty_weights(training_log, filename="uncertainty_weights.png")
-
-        if validation_log:
-            print("Generating plots from validation logs...")
-            visualizer.plot_validation_performance(validation_log, filename="validation_performance.png")
-
-        # 3. Generate inference-based plots (Qualitative, Confusion Matrix).
-        #    This section has two paths: use pre-computed results, or generate them now.
-        if evaluation_results and 'confusion_matrices' in evaluation_results:
-            print("Generating confusion matrix plots from provided evaluation results...")
-            confusion_matrices = evaluation_results['confusion_matrices']
-        else:
-            print("Generating new data for qualitative and confusion matrix plots...")
-            # --- This block runs a mini-evaluation to get necessary data ---
-            model = self.get_model()
-            checkpoint_path = os.path.join(output_dir, "best_model.pth")
-            if not os.path.exists(checkpoint_path):
-                raise FileNotFoundError(f"Cannot generate visualizations. Checkpoint not found at {checkpoint_path}")
-            model.load_state_dict(torch.load(checkpoint_path, map_location='cpu'))
-            
-            val_loader = self.get_dataloaders()['val']
-            metrics_calculator = self.get_metrics_calculator()
-            metrics_calculator.reset()
-            
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            model.to(device)
-            model.eval()
-
-            qualitative_samples = []
-            num_to_collect = vis_config.get('num_qualitative_samples', 8)
-
-            with torch.no_grad():
-                for batch in tqdm(val_loader, desc="Generating visualization data"):
-                    images = batch['image'].to(device)
-                    is_mtl = 'masks' in batch
-                    
-                    if is_mtl:
-                        targets = {k: v.to(device) for k, v in batch['masks'].items()}
-                    else:
-                        targets = batch['mask'].to(device)
-                        
-                    predictions = model(images)
-                    metrics_calculator.update(predictions, targets)
-
-                    if len(qualitative_samples) < num_to_collect:
-                        qualitative_samples.append({
-                            'image': images.cpu(),
-                            'predictions': {k: v.cpu() for k, v in predictions.items()} if is_mtl else predictions.cpu(),
-                            'ground_truth': {k: v.cpu() for k, v in batch['masks'].items()} if is_mtl else batch['mask'].cpu()
-                        })
-
-            confusion_matrices = metrics_calculator.confusion_matrices
-            
-            # --- Now generate the plots with the newly collected data ---
-            self._generate_qualitative_plots(visualizer, qualitative_samples, vis_config)
-
-        # This part runs whether the CMs were provided or generated
-        self._generate_confusion_plots(visualizer, confusion_matrices)
-            
-        print("\n--- Visualization Workflow Complete ---")
-
-    def _generate_qualitative_plots(self, visualizer, samples, vis_config):
-        if not samples: return
-        
-        # Un-batch the collected samples
-        images = torch.cat([s['image'] for s in samples])
-        is_mtl = isinstance(samples[0]['ground_truth'], dict)
-
-        primary_tasks = self.config.get('metrics', {}).get('primary_tasks', [])
-        
-        for task_name in primary_tasks:
-            if is_mtl:
-                gt_masks = torch.cat([s['ground_truth'][task_name] for s in samples])
-                pred_logits = torch.cat([s['predictions'][task_name] for s in samples])
-                pred_masks = torch.argmax(pred_logits, dim=1)
-            else: # Baseline case: assume the single mask corresponds to the first primary task
-                gt_masks = torch.cat([s['ground_truth'] for s in samples])
-                pred_logits = torch.cat([s['predictions'] for s in samples])
-                pred_masks = torch.argmax(pred_logits, dim=1)
-
-            visualizer.plot_qualitative_results(
-                images, gt_masks, pred_masks,
-                task_name=task_name.capitalize(),
-                filename=f"qualitative_results_{task_name}.png",
-                num_samples=vis_config.get('num_qualitative_samples', 8)
-            )
-
-    def _generate_confusion_plots(self, visualizer, confusion_matrices):
-        vis_config = self.config.get('visualizer', {})
-
-        for task_name, cm_tensor in confusion_matrices.items():
-            # The visualizer now gets the class names from its own task_info
-            visualizer.plot_confusion_analysis(
-                cm=cm_tensor.cpu().numpy(),
-                task_name=task_name,  # Pass the raw task name
-                filename=f"confusion_matrix_{task_name}.png",
-                threshold=vis_config.get('confusion_matrix_threshold', 10),
-                top_k=vis_config.get('confusion_matrix_top_k', 3)
-            )

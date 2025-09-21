@@ -12,7 +12,7 @@ import os
 
 # Path to the root of the original 'coralscapes' directory
 # This directory should contain 'leftImg8bit' and 'gtFine' subdirectories
-DATASET_ROOT = "./dataset"  # TODO: Update this path!
+DATASET_ROOT = r"C:\Users\20232788\OneDrive - TU Eindhoven\Capstone_DBL_Files\dataset"  # TODO: Update this path!
 
 # =============================================================================
 # OUTPUT CONFIGURATION
@@ -46,7 +46,7 @@ NUM_WORKERS = None  # Will use os.cpu_count() if None
 
 # Path to a YAML file defining the class remapping for flattening labels
 # Set to None to skip task-specific label remapping
-TASK_DEFINITION_PATH = "./configs/task_definitions.yaml"
+#TASK_DEFINITION_PATH = "./configs/task_definitions.yaml"
 
 # =============================================================================
 # DERIVED SETTINGS (DO NOT MODIFY)

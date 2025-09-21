@@ -2,8 +2,6 @@
 # Section 4 and the "Final Technical Implementation Guide" of project_specification.md.
 # It has been refactored to be a high-performance, parallelized, and configurable
 # library function that generates a dataset with flattened, remapped class masks.
-import sys
-sys.path.append("../") # To ensure imports from src/ work when running from /scripts
 import argparse
 import yaml
 import numpy as np
@@ -17,7 +15,7 @@ from numba import jit
 import json
 import random
 from typing import Optional, Dict, Tuple, List, Set
-from scripts.id2labels_labels2colors_coralscapes import get_coralscapes_mappings
+from .id2labels_labels2colors_coralscapes import get_coralscapes_mappings
 
 @jit(nopython=True)
 def poisson_disk_sampling(
