@@ -11,6 +11,23 @@ from coral_mtl.engine.inference import SlidingWindowInferrer
 
 # --- 1. Mock Components for Predictable Testing ---
 
+class MockMetricsStorer:
+    """Mock metrics storer for testing."""
+    def __init__(self, output_dir):
+        self.output_dir = output_dir
+        
+    def open_for_run(self, is_testing=False):
+        pass
+        
+    def close(self):
+        pass
+        
+    def store_epoch_history(self, metrics, epoch):
+        pass
+        
+    def store_per_image_cms(self, image_id, cms, is_testing):
+        pass
+
 class MockSimpleModel(nn.Module):
     """
     A minimal model that produces segmentation-like output (B, C, H, W).
@@ -38,8 +55,10 @@ class MockMetricsCalculator:
     """
     def __init__(self):
         self.epoch_count = 0
+        self.per_image_cms_buffer = []  # Buffer for per-image confusion matrices
 
-    def update(self, preds, targets):
+    def update(self, predictions=None, original_targets=None, image_ids=None, **kwargs):
+        # Support both old signature (preds, targets) and new signature (predictions, original_targets, image_ids)
         pass  # No-op for testing
 
     def compute(self):
@@ -50,7 +69,7 @@ class MockMetricsCalculator:
     def reset(self):
         # This method is called by the trainer, but we make it a no-op 
         # for our epoch counter to simulate an improving metric.
-        pass
+        self.per_image_cms_buffer = []  # Reset the buffer
 
 # --- 2. Pytest Fixtures for Reusable Setup ---
 
@@ -85,7 +104,13 @@ def mock_data_loader():
     # Validation data: a single "full" image and its corresponding full mask
     val_image = torch.randn(1, 3, 32, 32)
     val_masks = {'task1': torch.randint(0, 10, (1, 32, 32))}
-    val_batch = {'image': val_image, 'masks': val_masks}
+    val_original_mask = torch.randint(0, 10, (1, 32, 32))  # Original mask for metrics
+    val_batch = {
+        'image': val_image, 
+        'masks': val_masks, 
+        'original_mask': val_original_mask,
+        'image_id': ['test_val_image_1']
+    }
     
     return [train_batch1, train_batch2], [val_batch]
 
@@ -101,8 +126,9 @@ def test_trainer_instantiation(mock_config, mock_data_loader):
     metrics_calc = MockMetricsCalculator()
     
     try:
+        metrics_storer = MockMetricsStorer(mock_config.OUTPUT_DIR)
         Trainer(model, train_loader, val_loader, loss_fn, metrics_calc,
-                optimizer, scheduler, mock_config)
+                metrics_storer, optimizer, scheduler, mock_config)
     except Exception as e:
         pytest.fail(f"Trainer instantiation failed: {e}")
 
@@ -121,8 +147,9 @@ def test_trainer_single_step_updates_weights(mock_config, mock_data_loader):
     # Clone initial weights to compare against later
     initial_weights = model.conv.weight.clone().detach()
 
+    metrics_storer = MockMetricsStorer(mock_config.OUTPUT_DIR)
     trainer = Trainer(model, train_loader, val_loader, loss_fn, metrics_calc,
-                      optimizer, scheduler, mock_config)
+                      metrics_storer, optimizer, scheduler, mock_config)
     
     # Run only one training epoch
     trainer.config.NUM_EPOCHS = 1
@@ -145,7 +172,7 @@ def test_trainer_checkpointing_on_metric_improvement(mock_config, mock_data_load
     metrics_calc = MockMetricsCalculator() # This mock returns improving scores
 
     trainer = Trainer(model, train_loader, val_loader, loss_fn, metrics_calc,
-                      optimizer, scheduler, mock_config)
+                      MockMetricsStorer(mock_config.OUTPUT_DIR), optimizer, scheduler, mock_config)
     
     trainer.train()
 
@@ -168,7 +195,7 @@ def test_trainer_with_optuna_pruning(mock_config, mock_data_loader):
     mock_trial.should_prune.return_value = True
 
     trainer = Trainer(model, train_loader, val_loader, loss_fn, metrics_calc,
-                      optimizer, scheduler, mock_config, trial=mock_trial)
+                      MockMetricsStorer(mock_config.OUTPUT_DIR), optimizer, scheduler, mock_config, trial=mock_trial)
     
     # Expect the trainer to raise this specific exception
     with pytest.raises(optuna.exceptions.TrialPruned):
@@ -191,7 +218,7 @@ def test_trainer_with_optuna_reporting(mock_config, mock_data_loader):
     mock_trial.should_prune.return_value = False
 
     trainer = Trainer(model, train_loader, val_loader, loss_fn, metrics_calc,
-                      optimizer, scheduler, mock_config, trial=mock_trial)
+                      MockMetricsStorer(mock_config.OUTPUT_DIR), optimizer, scheduler, mock_config, trial=mock_trial)
     
     trainer.train()
 

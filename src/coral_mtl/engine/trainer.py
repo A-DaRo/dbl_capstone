@@ -109,7 +109,22 @@ class Trainer:
                 image_ids = batch['image_id']
 
                 # Perform inference on the batch of full-size images
-                stitched_predictions_logits = inferrer.predict_batch(batch_images)
+                # Note: We need to loop through each image in the batch since predict takes single images
+                batch_predictions = {}
+                for idx, single_image in enumerate(batch_images):
+                    single_predictions = inferrer.predict(single_image)
+                    if idx == 0:
+                        # Initialize batch_predictions with the right structure
+                        for task_name in single_predictions:
+                            batch_predictions[task_name] = []
+                    for task_name, logits in single_predictions.items():
+                        batch_predictions[task_name].append(logits)
+                
+                # Stack predictions for batch processing
+                stitched_predictions_logits = {
+                    task_name: torch.stack(task_logits, dim=0)
+                    for task_name, task_logits in batch_predictions.items()
+                }
 
                 # Update metrics with the required data payload
                 self.metrics_calculator.update(

@@ -264,7 +264,16 @@ class ExperimentFactory:
         
         # 2. Instantiate based on type
         if loss_type == "CompositeHierarchical":
-            num_classes_dict = self.task_info.get('num_classes')
+            num_classes_dict = {}
+            for task_name, task_data in self.task_splitter.hierarchical_definitions.items():
+                # Check if task has grouped structure or ungrouped structure
+                if 'ungrouped' in task_data:
+                    num_classes_dict[task_name] = len(task_data['ungrouped']['id2label'])
+                elif 'id2label' in task_data:
+                    num_classes_dict[task_name] = len(task_data['id2label'])
+                else:
+                    raise ValueError(f"Task {task_name} has no valid id2label structure")
+            
             if not num_classes_dict:
                  raise ValueError("CoralMTLLoss requires 'task_definitions_path' to be set.")
             
@@ -377,7 +386,8 @@ class ExperimentFactory:
         # 2. Prepare the trainer-specific configuration object.
         # --- Prepare configuration object for the Trainer ---
         trainer_config = SimpleNamespace(**self.config.get('trainer', {}))
-        if trainer_config.device == 'auto':
+        device = getattr(trainer_config, 'device', 'auto')
+        if device == 'auto':
             trainer_config.device = "cuda" if torch.cuda.is_available() else "cpu"
         
         # Inject other required configs
