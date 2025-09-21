@@ -40,7 +40,7 @@ PDS_RADIUS = 300
 
 # Number of CPU cores to use for parallel processing
 # Set to None to use all available cores
-NUM_WORKERS = None  # Will use os.cpu_count() if None
+NUM_WORKERS = 96  # Will use os.cpu_count() if None
 
 # =============================================================================
 # TASK DEFINITION (OPTIONAL)
