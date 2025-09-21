@@ -16,6 +16,7 @@ import json
 import random
 from typing import Optional, Dict, Tuple, List, Set
 from .id2labels_labels2colors_coralscapes import get_coralscapes_mappings
+from ..utils.task_splitter import BaseTaskSplitter
 
 @jit(nopython=True)
 def poisson_disk_sampling(
@@ -93,7 +94,8 @@ def _create_remapping_assets(
 ) -> Tuple[np.ndarray, Dict[int, str], Dict[str, Tuple[int, int, int]]]:
     """
     Builds all necessary assets for remapping as defined in the "Final Technical Implementation Guide".
-    This includes the lookup table (LUT) for flattening classes, new ID-to-label mappings,
+    Uses BaseTaskSplitter from task_splitter.py to handle task definition parsing and create
+    the lookup table (LUT) for flattening classes, new ID-to-label mappings,
     and a new label-to-color mapping with intelligent, non-colliding color assignment.
     """
     if task_definition_path is None:
@@ -105,54 +107,50 @@ def _create_remapping_assets(
     with open(task_definition_path, 'r') as f:
         task_definitions = yaml.safe_load(f)
 
-    remapping_lut = np.zeros(num_original_classes, dtype=np.uint8)
-    new_id2label = {0: "unlabeled"}
+    # Use BaseTaskSplitter to create flattened mapping for baseline model training
+    task_splitter = BaseTaskSplitter(task_definitions)
+    
+    # Get the flattened mapping array and labels
+    remapping_lut = task_splitter.flat_mapping_array.astype(np.uint8)
+    new_id2label = task_splitter.flat_id2label
+    
+    # Create color mapping for the new labels
     new_label2color = {"unlabeled": (0, 0, 0)}
     used_colors: Set[Tuple[int, int, int]] = {(0, 0, 0)}
     
-    all_new_ids = {0}
-    for task_group, details in task_definitions.items():
-        for new_id_str, new_label_name in details.get('id2label', {}).items():
-            new_id = int(new_id_str)
-            if new_id == 0: continue
-            if new_id in all_new_ids:
-                raise ValueError(f"Duplicate new class ID '{new_id}' found in id2label section.")
-            all_new_ids.add(new_id)
-            new_id2label[new_id] = new_label_name
-
-    for task_group, details in task_definitions.items():
-        for new_id_str, old_ids in details.get('mapping', {}).items():
-            new_id = int(new_id_str)
-            new_label_name = new_id2label.get(new_id)
-            if not new_label_name:
-                raise ValueError(f"Mapping for new ID '{new_id}' has no corresponding label in id2label.")
+    # For each new label (excluding unlabeled/background), find a color
+    for flat_id, label_name in new_id2label.items():
+        if flat_id == 0:  # Skip background/unlabeled
+            continue
             
-            for old_id in old_ids:
-                if old_id < num_original_classes:
-                    remapping_lut[old_id] = new_id
+        chosen_color = None
+        
+        # Find original IDs that map to this flattened ID
+        original_ids_for_this_label = np.where(remapping_lut == flat_id)[0]
+        
+        # Try to find a color from the original mappings
+        for orig_id in original_ids_for_this_label:
+            original_label = original_id2label.get(orig_id)
+            if original_label:
+                candidate_color = original_label2color.get(original_label)
+                if candidate_color and candidate_color not in used_colors:
+                    chosen_color = candidate_color
+                    break
+        
+        # If no suitable color found, generate a random one
+        if chosen_color is None:
+            while True:
+                r, g, b = random.randint(30, 225), random.randint(30, 225), random.randint(30, 225)
+                random_color = (r, g, b)
+                if random_color not in used_colors:
+                    chosen_color = random_color
+                    print(f"Warning: Could not find a unique source color for '{label_name}'. Assigning random color {chosen_color}.")
+                    break
+        
+        new_label2color[label_name] = chosen_color
+        used_colors.add(chosen_color)
 
-            chosen_color = None
-            for old_id in old_ids:
-                original_label = original_id2label.get(old_id)
-                if original_label:
-                    candidate_color = original_label2color.get(original_label)
-                    if candidate_color and candidate_color not in used_colors:
-                        chosen_color = candidate_color
-                        break
-            
-            if chosen_color is None:
-                while True:
-                    r, g, b = random.randint(30, 225), random.randint(30, 225), random.randint(30, 225)
-                    random_color = (r, g, b)
-                    if random_color not in used_colors:
-                        chosen_color = random_color
-                        print(f"Warning: Could not find a unique source color for '{new_label_name}'. Assigning random color {chosen_color}.")
-                        break
-            
-            new_label2color[new_label_name] = chosen_color
-            used_colors.add(chosen_color)
-
-    print("Successfully created remapping assets.")
+    print("Successfully created remapping assets using TaskSplitter.")
     return remapping_lut, new_id2label, new_label2color
 
 def process_image(
@@ -166,15 +164,17 @@ def process_image(
     Worker function for parallel processing. It samples points, extracts patches,
     remaps labels using the provided LUT, and saves the results.
     """
-    img_path, mask_path = img_mask_path_tuple
-    output_dir = Path(output_dir_str)
-    output_img_dir = output_dir / "images"
-    output_mask_dir = output_dir / "masks"
-    patch_radius = patch_size // 2
-    
     try:
+        img_path, mask_path = img_mask_path_tuple
+        
+        output_dir = Path(output_dir_str)
+        output_img_dir = output_dir / "images"
+        output_mask_dir = output_dir / "masks"
+        patch_radius = patch_size // 2
+        
         image = Image.open(img_path).convert("RGB")
-        raw_mask = np.array(Image.open(mask_path))
+        mask_image = Image.open(mask_path)
+        raw_mask = np.array(mask_image)
         
         # As per Spec Section 4.2.1, create a foreground mask to seed sampling.
         # This assumes coral classes are non-zero. A more robust implementation
@@ -257,7 +257,13 @@ def create_pds_dataset(
     img_mask_pairs = []
     for img_path in image_files:
         identifier = img_path.name.replace('_leftImg8bit.png', '')
-        mask_path = mask_base_dir / img_path.relative_to(image_base_dir).parent / f"{identifier}_gtFine.png"
+        try:
+            mask_path = mask_base_dir / img_path.relative_to(image_base_dir).parent / f"{identifier}_gtFine.png"
+        except ValueError:
+            # This can happen if a file is found that is not a subpath of the base directory.
+            # For example, if the glob pattern is too broad or the directory structure is unexpected.
+            print(f"Warning: Skipping file that is not in the expected subpath: {img_path}")
+            continue
         if mask_path.exists():
             img_mask_pairs.append((img_path, mask_path))
     

@@ -24,9 +24,11 @@ class TaskSplitter(ABC):
         self.raw_definitions = task_definitions
         self._validate_initial_structure()
         
+        # Calculate max_original_id first as it's needed by _parse_tasks
+        self.max_original_id = self._find_max_original_id()
+        
         # --- Core Parsed Properties ---
         self.hierarchical_definitions: Dict[str, Dict[str, Any]] = self._parse_tasks()
-        self.max_original_id = self._find_max_original_id()
 
         # --- Global Space Properties ---
         self.global_mapping_array: np.ndarray

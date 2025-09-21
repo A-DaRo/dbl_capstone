@@ -12,7 +12,7 @@ import os
 
 # Path to the root of the original 'coralscapes' directory
 # This directory should contain 'leftImg8bit' and 'gtFine' subdirectories
-DATASET_ROOT = r"C:\Users\20232788\OneDrive - TU Eindhoven\Capstone_DBL_Files\dataset"  # TODO: Update this path!
+DATASET_ROOT = "example/path"  # TODO: Update this path!
 
 # =============================================================================
 # OUTPUT CONFIGURATION
