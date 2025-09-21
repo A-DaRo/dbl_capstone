@@ -16,3 +16,4 @@ numba
 plotly
 pandas
 segmentation_models_pytorch
+tabulate

@@ -94,7 +94,7 @@ def main():
             patch_size=args.patch_size,
             pds_radius=args.pds_radius,
             num_workers=args.num_workers,
-            task_definition_path=None  # Kept as None as in the original script
+            task_definition_path=None  # Kept as None for now
         )
         
         print("\n" + "="*50)
