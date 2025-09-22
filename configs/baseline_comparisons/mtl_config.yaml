@@ -130,7 +130,7 @@ trainer:
   gradient_accumulation_steps: 2
   
   # Enable mixed precision training (FP16) for faster training on compatible hardware
-  use_mixed_precision: True
+  use_mixed_precision: false
   
   # The key metric from the validation results used for selecting the best model.
   model_selection_metric: "global.BIoU"
