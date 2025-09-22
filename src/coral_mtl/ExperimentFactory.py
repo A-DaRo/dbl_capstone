@@ -44,8 +44,8 @@ class ExperimentFactory:
             config_path (str, optional): The path to the main YAML configuration file.
             config_dict (Dict, optional): A dictionary containing the configuration.
         """
-        # set root path for relative paths in config files
-        self.root_path = Path(".." / "..").resolve()
+        # Set root path for resolving relative paths in config files
+        self.root_path = Path(__file__).parent.parent.parent.resolve()
 
         if config_dict:
             self.config = config_dict
