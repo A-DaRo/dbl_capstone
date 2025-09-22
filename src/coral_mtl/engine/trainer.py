@@ -34,7 +34,13 @@ class Trainer:
         
         self.device = torch.device(config.device)
         self.output_dir = Path(config.output_dir)
-        self.scaler = torch.amp.GradScaler(enabled=(self.device.type == 'cuda'))
+        
+        # Configure mixed precision based on config and device compatibility
+        self.use_mixed_precision = getattr(config, 'use_mixed_precision', False) and (self.device.type == 'cuda')
+        self.scaler = torch.amp.GradScaler(enabled=self.use_mixed_precision)
+        
+        print(f"Training device: {self.device}")
+        print(f"Mixed precision (FP16) enabled: {self.use_mixed_precision}")
         
         self.best_metric = -1.0
         self.training_log = defaultdict(list)
@@ -56,7 +62,7 @@ class Trainer:
             else:
                 masks_for_loss = masks_for_loss.to(self.device, non_blocking=True)
 
-            with torch.amp.autocast(device_type=self.device.type, enabled=(self.device.type == 'cuda')):
+            with torch.amp.autocast(device_type=self.device.type, enabled=self.use_mixed_precision):
                 predictions = self.model(images)
                 loss_dict_or_tensor = self.loss_fn(predictions, masks_for_loss)
                 
