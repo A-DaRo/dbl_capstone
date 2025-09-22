@@ -45,7 +45,9 @@ class AbstractCoralMetrics(ABC):
                    'grouped': {'intersection': 0.0, 'union': 0.0} if details.get('is_grouped') else None}
             for task, details in self.splitter.hierarchical_definitions.items()
         }
-        self.per_image_cms_buffer: List[Tuple[str, Dict[str, np.ndarray]]] = []
+        # Add global BIoU stats tracking
+        self.global_biou_stats = {'intersection': 0.0, 'union': 0.0}
+        self.per_image_cms_buffer: List[Tuple[str, Dict[str, np.ndarray], Dict[str, np.ndarray]]] = []
 
     @abstractmethod
     def update(self, predictions: Any, original_targets: torch.Tensor, image_ids: List[str]):
@@ -61,6 +63,18 @@ class AbstractCoralMetrics(ABC):
                 pred_boundary = binary_dilation(pred_c, iterations=self.boundary_thickness) & ~pred_c
                 self.biou_stats[task_name][level]['intersection'] += np.sum(gt_boundary & pred_boundary)
                 self.biou_stats[task_name][level]['union'] += np.sum(gt_boundary | pred_boundary)
+
+    def _update_global_biou_stats(self, global_pred_np: np.ndarray, global_target_np: np.ndarray):
+        """Update global BIoU statistics across all classes."""
+        for i in range(global_pred_np.shape[0]):
+            for c in range(1, self.splitter.num_global_classes):  # Skip background class 0
+                gt_c = (global_target_np[i] == c)
+                pred_c = (global_pred_np[i] == c)
+                if not np.any(gt_c): continue
+                gt_boundary = binary_dilation(gt_c, iterations=self.boundary_thickness) & ~gt_c
+                pred_boundary = binary_dilation(pred_c, iterations=self.boundary_thickness) & ~pred_c
+                self.global_biou_stats['intersection'] += np.sum(gt_boundary & pred_boundary)
+                self.global_biou_stats['union'] += np.sum(gt_boundary | pred_boundary)
 
     def _compute_metrics_from_cm(self, cm: np.ndarray, class_names: List[str]) -> Dict[str, Any]:
         tp = np.diag(cm)
@@ -121,8 +135,18 @@ class AbstractCoralMetrics(ABC):
         
         # Global Metrics
         global_cm_np = self.global_cm.cpu().numpy()
-        report['global_summary'] = self._compute_metrics_from_cm(global_cm_np, self.splitter.global_class_names)
-        report['optimization_metrics']['global.mIoU'] = report['global_summary']['task_summary']['mIoU']
+        global_summary = self._compute_metrics_from_cm(global_cm_np, self.splitter.global_class_names)
+        report['global_summary'] = global_summary
+        
+        # Add global metrics to optimization_metrics
+        report['optimization_metrics']['global.mIoU'] = global_summary['task_summary']['mIoU']
+        report['optimization_metrics']['global.BIoU'] = self.global_biou_stats['intersection'] / (self.global_biou_stats['union'] + EPS)
+        
+        # Add global TIDE metrics to optimization_metrics
+        if global_summary['TIDE_errors']:
+            report['optimization_metrics']['global.classification_error'] = global_summary['TIDE_errors']['classification_error']
+            report['optimization_metrics']['global.background_error'] = global_summary['TIDE_errors']['background_error'] 
+            report['optimization_metrics']['global.missed_error'] = global_summary['TIDE_errors']['missed_error']
 
         return report
 
@@ -135,12 +159,24 @@ class CoralMTLMetrics(AbstractCoralMetrics):
         batch_size = original_targets.shape[0]
         global_target = self.splitter.global_mapping_torch.to(self.device)[original_targets]
 
+        # Convert predictions and targets to numpy for BIoU calculation
+        original_targets_np = original_targets.cpu().numpy()
+        global_target_np = global_target.cpu().numpy()
+        
+        # Calculate global predictions for BIoU
+        pred_fg = torch.zeros_like(original_targets, dtype=torch.long)
+        for p in preds.values():
+            pred_fg |= (p > 0)
+        global_pred = pred_fg * self.splitter.global_mapping_torch.to(self.device)[original_targets]
+        global_pred_np = global_pred.cpu().numpy()
+
         for i in range(batch_size):
             img_id = image_ids[i]
             img_mask = mask[i]
             per_image_cms = {}
+            per_image_predictions = {}
 
-            # Update per-task CMs
+            # Update per-task CMs and BIoU stats
             for task, details in self.splitter.hierarchical_definitions.items():
                 mapping = torch.from_numpy(details['ungrouped']['mapping_array']).to(self.device)
                 target_ungrouped = mapping[original_targets[i]]
@@ -152,6 +188,27 @@ class CoralMTLMetrics(AbstractCoralMetrics):
                     minlength=n_cls**2).reshape(n_cls, n_cls)
                 self.task_cms[task] += cm_update
                 per_image_cms[task] = cm_update.cpu().numpy()
+                
+                # Store the predicted mask for this task
+                per_image_predictions[task] = pred_ungrouped.cpu().numpy()
+                
+                # Update BIoU stats for ungrouped level
+                target_ungrouped_np = target_ungrouped.cpu().numpy()
+                pred_ungrouped_np = pred_ungrouped.cpu().numpy()
+                self._update_biou_stats(
+                    pred_ungrouped_np[None, ...], target_ungrouped_np[None, ...], 
+                    task, 'ungrouped'
+                )
+                
+                # Update BIoU stats for grouped level if applicable
+                if details.get('is_grouped'):
+                    grouped_mapping = details['ungrouped_to_grouped_map']
+                    target_grouped_np = grouped_mapping[target_ungrouped_np]
+                    pred_grouped_np = grouped_mapping[pred_ungrouped_np]
+                    self._update_biou_stats(
+                        pred_grouped_np[None, ...], target_grouped_np[None, ...],
+                        task, 'grouped'
+                    )
 
             # Update Global CM
             pred_fg = torch.zeros_like(original_targets[i], dtype=torch.long)
@@ -166,7 +223,13 @@ class CoralMTLMetrics(AbstractCoralMetrics):
             self.global_cm += global_cm_update
             per_image_cms['global'] = global_cm_update.cpu().numpy()
             
-            self.per_image_cms_buffer.append((img_id, per_image_cms))
+            # Store global prediction mask
+            per_image_predictions['global'] = global_pred.cpu().numpy()
+            
+            self.per_image_cms_buffer.append((img_id, per_image_cms, per_image_predictions))
+        
+        # Update global BIoU stats (outside the per-image loop for efficiency)
+        self._update_global_biou_stats(global_pred_np, global_target_np)
 
 class CoralMetrics(AbstractCoralMetrics):
     """Metrics calculator for baseline (single-head) models."""
@@ -178,13 +241,20 @@ class CoralMetrics(AbstractCoralMetrics):
         global_target = self.splitter.global_mapping_torch.to(self.device)[original_targets]
         global_pred = self.splitter.global_mapping_torch.to(self.device)[original_preds]
         
+        # Convert to numpy for BIoU calculations
+        original_targets_np = original_targets.cpu().numpy()
+        original_preds_np = original_preds.cpu().numpy()
+        global_target_np = global_target.cpu().numpy()
+        global_pred_np = global_pred.cpu().numpy()
+        
         batch_size = original_targets.shape[0]
         for i in range(batch_size):
             img_id = image_ids[i]
             img_mask = mask[i]
             per_image_cms = {}
+            per_image_predictions = {}
 
-            # Update per-task CMs
+            # Update per-task CMs and BIoU stats
             for task, details in self.splitter.hierarchical_definitions.items():
                 mapping = torch.from_numpy(details['ungrouped']['mapping_array']).to(self.device)
                 target_ungrouped = mapping[original_targets[i]]
@@ -195,6 +265,27 @@ class CoralMetrics(AbstractCoralMetrics):
                     minlength=n_cls**2).reshape(n_cls, n_cls)
                 self.task_cms[task] += cm_update
                 per_image_cms[task] = cm_update.cpu().numpy()
+                
+                # Store the predicted mask for this task
+                per_image_predictions[task] = pred_ungrouped.cpu().numpy()
+                
+                # Update BIoU stats for ungrouped level
+                target_ungrouped_np = target_ungrouped.cpu().numpy()
+                pred_ungrouped_np = pred_ungrouped.cpu().numpy()
+                self._update_biou_stats(
+                    pred_ungrouped_np[None, ...], target_ungrouped_np[None, ...], 
+                    task, 'ungrouped'
+                )
+                
+                # Update BIoU stats for grouped level if applicable
+                if details.get('is_grouped'):
+                    grouped_mapping = details['ungrouped_to_grouped_map']
+                    target_grouped_np = grouped_mapping[target_ungrouped_np]
+                    pred_grouped_np = grouped_mapping[pred_ungrouped_np]
+                    self._update_biou_stats(
+                        pred_grouped_np[None, ...], target_grouped_np[None, ...],
+                        task, 'grouped'
+                    )
 
             # Update Global CM
             n_cls_global = self.splitter.num_global_classes
@@ -204,4 +295,10 @@ class CoralMetrics(AbstractCoralMetrics):
             self.global_cm += global_cm_update
             per_image_cms['global'] = global_cm_update.cpu().numpy()
             
-            self.per_image_cms_buffer.append((img_id, per_image_cms))
+            # Store global prediction mask
+            per_image_predictions['global'] = global_pred[i].cpu().numpy()
+            
+            self.per_image_cms_buffer.append((img_id, per_image_cms, per_image_predictions))
+        
+        # Update global BIoU stats (outside the per-image loop for efficiency)
+        self._update_global_biou_stats(global_pred_np, global_target_np)

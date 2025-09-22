@@ -80,8 +80,8 @@ class MetricsStorer:
             json.dump(self._history_data, f, indent=2)
         os.replace(temp_path, self.history_path)
 
-    def store_per_image_cms(self, image_id: str, confusion_matrices: Dict[str, np.ndarray], is_testing: bool = False):
-        """Stores the raw confusion matrices for a single image to a JSONL file."""
+    def store_per_image_cms(self, image_id: str, confusion_matrices: Dict[str, np.ndarray], predicted_masks: Dict[str, np.ndarray] = None, is_testing: bool = False, epoch: int = None):
+        """Stores the raw confusion matrices and predicted masks for a single image to a JSONL file."""
         file_handle = self._test_cm_file if is_testing else self._val_cm_file
         if not file_handle:
             raise IOError("File handle is not open. Call `open_for_run()` before storing per-image data.")
@@ -90,4 +90,22 @@ class MetricsStorer:
             task: cm.tolist() for task, cm in confusion_matrices.items()
         }
         record = {"image_id": image_id, "confusion_matrices": serializable_cms}
+        
+        # Add predicted masks if provided
+        if predicted_masks is not None:
+            serializable_predictions = {
+                task: pred.tolist() if isinstance(pred, np.ndarray) else pred
+                for task, pred in predicted_masks.items()
+            }
+            record["predicted_masks"] = serializable_predictions
+        
+        if epoch is not None:
+            record["epoch"] = epoch
+            
         file_handle.write(json.dumps(record) + '\n')
+
+    def save_final_report(self, metrics_report: Dict[str, Any], filename: str):
+        """Saves the final metrics report as a JSON file."""
+        report_path = os.path.join(self.output_dir, filename)
+        with open(report_path, 'w') as f:
+            json.dump(metrics_report, f, indent=2)

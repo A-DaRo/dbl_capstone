@@ -102,8 +102,8 @@ class Evaluator:
                     
                     # After updating, the calculator's buffer holds the per-image CMs for this batch.
                     # We store them immediately to keep memory usage low.
-                    for img_id, cms in self.metrics_calculator.per_image_cms_buffer:
-                        self.metrics_storer.store_per_image_cms(img_id, cms, is_testing=True)
+                    for img_id, cms, predictions in self.metrics_calculator.per_image_cms_buffer:
+                        self.metrics_storer.store_per_image_cms(img_id, cms, predictions, is_testing=True)
                     
                     # Clear the buffer after storing
                     self.metrics_calculator.per_image_cms_buffer.clear()

@@ -17,7 +17,7 @@ model:
 data:
   # The factory will first check if this is a valid local path. If not, it assumes
   # it's a Hugging Face Hub dataset ID.
-  dataset_name: "./dataset/"
+  dataset_name: "./dataset/coralscapes/"
 
   # Path to the pre-processed PDS-sampled training patches.
   # This is prioritized for the 'train' split, as specified in dataset.py.
@@ -25,11 +25,11 @@ data:
   
   # Path to the raw, full-image dataset. Used for 'val' and 'test' splits,
   # and as a fallback for 'train' if pds_train_path is not found.
-  data_root_path: "./dataset/"
+  data_root_path: "./dataset/coralscapes/"
 
   # The single source of truth for all class and task information.
   # Required for MTL models and for non-MTL models being evaluated on MTL tasks.
-  task_definitions_path: "configs/baseline_comparisons/task_definitions_mtl_no_flattening.yaml"
+  task_definitions_path: "configs/task_definitions.yaml"
   
   # Parameters for the final DataLoader object.
   batch_size: 4
@@ -37,6 +37,21 @@ data:
   
   # A fundamental parameter shared by datasets and augmentations.
   patch_size: 512
+
+# --------------------------------------------------------------------------
+# Configuration for the Augmentation Pipeline (for the 'train' split)
+# --------------------------------------------------------------------------
+augmentations:
+  # The scale range for the RandomResizedCrop transform.
+  crop_scale: [0.5, 1.0]
+  # The degree range for random rotations.
+  rotation_degrees: 15
+  # Parameters for the ColorJitter transform.
+  jitter_params:
+    brightness: 0.2
+    contrast: 0.2
+    saturation: 0.2
+    hue: 0.1
 
 # --------------------------------------------------------------------------
 loss:
@@ -67,13 +82,8 @@ optimizer:
     power: 1.0
 
 metrics:
-  # This list is crucial. It tells both metrics calculators which tasks should
-  # be used to compute the Boundary IoU (BIoU) and the final H-Mean score.
-  # The names must match the task names in task_definitions.yaml.
-  primary_tasks: ["genus", "health"]
-  
   # The thickness of the band (in pixels) used for BIoU calculation.
-  boundary_thickness: 2
+  boundary_thickness: 4
   
   # The class index to be ignored during metric calculation.
   # This should be consistent with the ignore_index in the loss function.
@@ -81,7 +91,41 @@ metrics:
 
 
 # --------------------------------------------------------------------------
-# The trainer section is needed to calculate total training steps for the scheduler.
+# Configuration for the Trainer Engine
 # --------------------------------------------------------------------------
 trainer:
+  # The main device for training. Can be "cuda", "cpu", or "auto".
+  device: "cuda"
+  
+  # Total number of epochs for the training run.
   epochs: 100
+  
+  # Directory where checkpoints, logs, and other artifacts will be saved.
+  output_dir: "experiments/baseline_comparisons/coral_baseline_b2_run"
+  
+  # Number of steps to accumulate gradients before performing an optimizer step.
+  gradient_accumulation_steps: 2
+  
+  # The key metric from the validation results used for selecting the best model.
+  # Should be 'H-Mean' for MTL models or a task-specific 'mIoU_{task_name}' for baselines.
+  model_selection_metric: "global.BIoU"
+  
+  # --- Parameters for the SlidingWindowInferrer used during validation ---
+  # The step size for the sliding window. A stride of patch_size/2 creates 50% overlap.
+  inference_stride: 256
+  
+  # The number of patches to process in a single batch during validation inference.
+  inference_batch_size: 16
+
+# --------------------------------------------------------------------------
+# Configuration for the Evaluator Engine
+# --------------------------------------------------------------------------
+evaluator:
+  # Optional: Explicitly provide a path to a model checkpoint.
+  # If this is commented out or null, the factory will automatically find
+  # the 'best_model.pth' file inside the trainer.output_dir.
+  checkpoint_path: null
+
+  # Optional: Specify a dedicated directory for evaluation artifacts.
+  # If null, it defaults to a subfolder named 'evaluation' within trainer.output_dir.
+  output_dir: null

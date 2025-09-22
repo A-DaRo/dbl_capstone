@@ -4,6 +4,7 @@ seaview/
 models/
 dataset/
 .vscode/
+fake_output/
 
 # Byte-compiled / optimized / DLL files
 *.pth

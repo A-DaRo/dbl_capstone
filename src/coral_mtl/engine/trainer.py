@@ -83,7 +83,7 @@ class Trainer:
             self.training_log['lr'].append(self.scheduler.get_last_lr()[0])
             loop.set_postfix(loss=(total_loss.item() * self.config.GRADIENT_ACCUMULATION_STEPS))
 
-    def _validate_one_epoch(self) -> Dict[str, Any]:
+    def _validate_one_epoch(self, epoch: int = None) -> Dict[str, Any]:
         """
         Executes a single validation epoch using sliding window inference.
         It computes a full metrics report and stores per-image confusion matrices.
@@ -134,8 +134,8 @@ class Trainer:
                 )
         
         # After the loop, store all buffered per-image CMs from this epoch
-        for img_id, cms in self.metrics_calculator.per_image_cms_buffer:
-            self.metrics_storer.store_per_image_cms(img_id, cms, is_testing=False)
+        for img_id, cms, predictions in self.metrics_calculator.per_image_cms_buffer:
+            self.metrics_storer.store_per_image_cms(img_id, cms, predictions, is_testing=False, epoch=epoch)
         
         # Clear the buffer in preparation for the next validation epoch
         self.metrics_calculator.per_image_cms_buffer.clear()
@@ -166,7 +166,7 @@ class Trainer:
             for epoch in range(self.config.NUM_EPOCHS):
                 print(f"\n===== Epoch {epoch+1}/{self.config.NUM_EPOCHS} =====")
                 self._train_one_epoch()
-                val_metrics_report = self._validate_one_epoch()
+                val_metrics_report = self._validate_one_epoch(epoch + 1)
                 
                 # Store the flattened summary metrics for this epoch
                 self.metrics_storer.store_epoch_history(val_metrics_report, epoch + 1)
