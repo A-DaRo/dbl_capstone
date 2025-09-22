@@ -441,14 +441,14 @@ class ExperimentFactory:
 
         # 1. Assemble all required components using internal getter methods.
         #    This ensures a consistent and config-driven setup.
-        print("1/4: Assembling model...")
+        print("1/5: Assembling model...")
         model = self.get_model()
         
-        print("2/4: Assembling dataloaders...")
+        print("2/5: Assembling dataloaders...")
         dataloaders = self.get_dataloaders()
 
         
-        print("3/4: Assembling optimizer, scheduler, loss, and metrics...")
+        print("3/5: Assembling optimizer, scheduler, loss, and metrics...")
         optimizer, scheduler = self.get_optimizer_and_scheduler()
         loss_fn = self.get_loss_function()
         metrics_calculator = self.get_metrics_calculator()
@@ -456,6 +456,7 @@ class ExperimentFactory:
 
         # 2. Prepare the trainer-specific configuration object.
         # --- Prepare configuration object for the Trainer ---
+        print("4/5: Preparing trainer configuration...")
         trainer_config = SimpleNamespace(**self.config.get('trainer', {}))
         device = getattr(trainer_config, 'device', 'auto')
         if device == 'auto':
@@ -463,6 +464,12 @@ class ExperimentFactory:
         
         # Inject other required configs
         trainer_config.patch_size = self.config.get('data', {}).get('patch_size', 512)
+        
+        # 4. Move model to the correct device
+        print(f"5/5: Moving model and loss to device: {trainer_config.device}")
+        target_device = torch.device(trainer_config.device)
+        model = model.to(target_device)
+        loss_fn = loss_fn.to(target_device)
         
 
          # --- Instantiate and run the Trainer ---
@@ -541,6 +548,11 @@ class ExperimentFactory:
         )
         if eval_config.device == 'auto':
             eval_config.device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        # Move model to the correct device before evaluation
+        print(f"Moving model to device: {eval_config.device}")
+        target_device = torch.device(eval_config.device)
+        model = model.to(target_device)
 
         # --- Instantiate and run the Evaluator ---
         evaluator = Evaluator(
