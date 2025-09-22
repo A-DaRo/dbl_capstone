@@ -2,43 +2,43 @@
 
 | ID  | Class Name                   | Pixel Count          | Percentage |
 |:----|:-----------------------------|:---------------------|:-----------|
-| 0   | unlabeled                    | 956,100,430          | 17.835%   |
-| 1   | seagrass                     | 46,082,085           | 0.860%   |
-| 2   | trash                        | 3,623,242            | 0.068%   |
-| 3   | other coral dead             | 12,678,822           | 0.237%   |
-| 4   | other coral bleached         | 14,653,396           | 0.273%   |
-| 5   | sand                         | 341,982,148          | 6.379%   |
-| 6   | other coral alive            | 223,760,295          | 4.174%   |
-| 7   | human                        | 66,110,857           | 1.233%   |
-| 8   | transect tools               | 4,021,348            | 0.075%   |
-| 9   | fish                         | 26,717,657           | 0.498%   |
-| 10  | algae covered substrate      | 305,360,664          | 5.696%   |
-| 11  | other animal                 | 2,739,318            | 0.051%   |
-| 12  | unknown hard substrate       | 659,134,669          | 12.295%   |
-| 13  | background                   | 870,980,186          | 16.247%   |
-| 14  | dark                         | 279,368,126          | 5.211%   |
-| 15  | transect line                | 16,483,145           | 0.307%   |
-| 16  | massive/meandering bleached  | 5,152,622            | 0.096%   |
-| 17  | massive/meandering alive     | 530,503,041          | 9.896%   |
-| 18  | rubble                       | 245,537,101          | 4.580%   |
-| 19  | branching bleached           | 24,622,505           | 0.459%   |
-| 20  | branching dead               | 58,267,475           | 1.087%   |
-| 21  | millepora                    | 16,115,996           | 0.301%   |
-| 22  | branching alive              | 30,397,408           | 0.567%   |
-| 23  | massive/meandering dead      | 53,733,283           | 1.002%   |
-| 24  | clam                         | 1,587,739            | 0.030%   |
-| 25  | acropora alive               | 95,145,785           | 1.775%   |
-| 26  | sea cucumber                 | 2,252,875            | 0.042%   |
-| 27  | turbinaria                   | 6,338,407            | 0.118%   |
-| 28  | table acropora alive         | 196,659,197          | 3.668%   |
-| 29  | sponge                       | 12,856,321           | 0.240%   |
-| 30  | anemone                      | 5,289,111            | 0.099%   |
-| 31  | pocillopora alive            | 98,686,708           | 1.841%   |
-| 32  | table acropora dead          | 53,429,890           | 0.997%   |
-| 33  | meandering bleached          | 2,611,140            | 0.049%   |
-| 34  | stylophora alive             | 14,598,825           | 0.272%   |
-| 35  | sea urchin                   | 1,616,212            | 0.030%   |
-| 36  | meandering alive             | 51,725,614           | 0.965%   |
-| 37  | meandering dead              | 18,630,196           | 0.348%   |
-| 38  | crown of thorn               | 4,108,153            | 0.077%   |
-| 39  | dead clam                    | 1,182,808            | 0.022%   |
+| 0   | unlabeled                    | 359,065,715          | 17.579%   |
+| 1   | seagrass                     | 17,617,865           | 0.863%   |
+| 2   | trash                        | 1,272,786            | 0.062%   |
+| 3   | other coral dead             | 4,852,800            | 0.238%   |
+| 4   | other coral bleached         | 5,455,322            | 0.267%   |
+| 5   | sand                         | 137,057,035          | 6.710%   |
+| 6   | other coral alive            | 85,978,619           | 4.209%   |
+| 7   | human                        | 26,487,641           | 1.297%   |
+| 8   | transect tools               | 1,645,112            | 0.081%   |
+| 9   | fish                         | 10,215,828           | 0.500%   |
+| 10  | algae covered substrate      | 112,385,371          | 5.502%   |
+| 11  | other animal                 | 1,119,731            | 0.055%   |
+| 12  | unknown hard substrate       | 255,042,587          | 12.486%   |
+| 13  | background                   | 326,001,949          | 15.960%   |
+| 14  | dark                         | 105,773,265          | 5.178%   |
+| 15  | transect line                | 6,221,857            | 0.305%   |
+| 16  | massive/meandering bleached  | 2,615,211            | 0.128%   |
+| 17  | massive/meandering alive     | 198,443,467          | 9.715%   |
+| 18  | rubble                       | 94,238,051           | 4.614%   |
+| 19  | branching bleached           | 10,216,416           | 0.500%   |
+| 20  | branching dead               | 22,966,360           | 1.124%   |
+| 21  | millepora                    | 7,601,357            | 0.372%   |
+| 22  | branching alive              | 11,690,942           | 0.572%   |
+| 23  | massive/meandering dead      | 20,297,325           | 0.994%   |
+| 24  | clam                         | 731,711              | 0.036%   |
+| 25  | acropora alive               | 35,222,712           | 1.724%   |
+| 26  | sea cucumber                 | 804,244              | 0.039%   |
+| 27  | turbinaria                   | 2,697,834            | 0.132%   |
+| 28  | table acropora alive         | 76,465,815           | 3.744%   |
+| 29  | sponge                       | 4,691,825            | 0.230%   |
+| 30  | anemone                      | 1,926,248            | 0.094%   |
+| 31  | pocillopora alive            | 37,272,919           | 1.825%   |
+| 32  | table acropora dead          | 20,825,631           | 1.020%   |
+| 33  | meandering bleached          | 920,797              | 0.045%   |
+| 34  | stylophora alive             | 5,656,893            | 0.277%   |
+| 35  | sea urchin                   | 560,014              | 0.027%   |
+| 36  | meandering alive             | 20,528,847           | 1.005%   |
+| 37  | meandering dead              | 7,513,435            | 0.368%   |
+| 38  | crown of thorn               | 2,003,325            | 0.098%   |
+| 39  | dead clam                    | 541,186              | 0.026%   |
