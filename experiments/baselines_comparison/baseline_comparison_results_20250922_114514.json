@@ -1,0 +1,36 @@
+{
+  "comparison_start_time": "2025-09-22T11:45:14.004203",
+  "modes_run": [
+    "baseline",
+    "mtl"
+  ],
+  "experiments": {
+    "baseline": {
+      "name": "baseline",
+      "config_path": "/workspace/dbl_capstone/configs/baseline_comparisons/baseline_config.yaml",
+      "error": "\u274c Unexpected error in baseline experiment: unsupported operand type(s) for /: 'str' and 'str'",
+      "training_completed": false,
+      "evaluation_completed": false
+    },
+    "mtl": {
+      "name": "mtl",
+      "config_path": "/workspace/dbl_capstone/configs/baseline_comparisons/mtl_config.yaml",
+      "error": "\u274c Unexpected error in mtl experiment: unsupported operand type(s) for /: 'str' and 'str'",
+      "training_completed": false,
+      "evaluation_completed": false
+    }
+  },
+  "summary": {
+    "baseline": {
+      "success": false,
+      "error": "\u274c Unexpected error in baseline experiment: unsupported operand type(s) for /: 'str' and 'str'",
+      "key_metrics": {}
+    },
+    "mtl": {
+      "success": false,
+      "error": "\u274c Unexpected error in mtl experiment: unsupported operand type(s) for /: 'str' and 'str'",
+      "key_metrics": {}
+    }
+  },
+  "comparison_end_time": "2025-09-22T11:45:14.004925"
+}

@@ -1,0 +1,42 @@
+{
+  "comparison_start_time": "2025-09-22T13:00:19.878987",
+  "modes_run": [
+    "baseline",
+    "mtl"
+  ],
+  "experiments": {
+    "baseline": {
+      "name": "baseline",
+      "config_path": "/workspace/dbl_capstone/configs/baseline_comparisons/baseline_config.yaml",
+      "start_time": "2025-09-22T13:00:19.887468",
+      "training_completed": false,
+      "evaluation_completed": false,
+      "training_metrics": null,
+      "test_metrics": null,
+      "error": "\u274c Training failed for baseline: argmax(): argument 'input' (position 1) must be Tensor, not dict"
+    },
+    "mtl": {
+      "name": "mtl",
+      "config_path": "/workspace/dbl_capstone/configs/baseline_comparisons/mtl_config.yaml",
+      "start_time": "2025-09-22T13:04:21.963451",
+      "training_completed": false,
+      "evaluation_completed": false,
+      "training_metrics": null,
+      "test_metrics": null,
+      "error": "\u274c Training failed for mtl: 'background'"
+    }
+  },
+  "summary": {
+    "baseline": {
+      "success": false,
+      "error": "\u274c Training failed for baseline: argmax(): argument 'input' (position 1) must be Tensor, not dict",
+      "key_metrics": {}
+    },
+    "mtl": {
+      "success": false,
+      "error": "\u274c Training failed for mtl: 'background'",
+      "key_metrics": {}
+    }
+  },
+  "comparison_end_time": "2025-09-22T13:04:25.656643"
+}

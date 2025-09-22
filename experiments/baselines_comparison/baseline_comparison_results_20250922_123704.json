@@ -1,0 +1,42 @@
+{
+  "comparison_start_time": "2025-09-22T12:36:59.937520",
+  "modes_run": [
+    "baseline",
+    "mtl"
+  ],
+  "experiments": {
+    "baseline": {
+      "name": "baseline",
+      "config_path": "/workspace/dbl_capstone/configs/baseline_comparisons/baseline_config.yaml",
+      "start_time": "2025-09-22T12:36:59.945891",
+      "training_completed": false,
+      "evaluation_completed": false,
+      "training_metrics": null,
+      "test_metrics": null,
+      "error": "\u274c Training failed for baseline: Input type (c10::Half) and bias type (float) should be the same"
+    },
+    "mtl": {
+      "name": "mtl",
+      "config_path": "/workspace/dbl_capstone/configs/baseline_comparisons/mtl_config.yaml",
+      "start_time": "2025-09-22T12:37:02.645500",
+      "training_completed": false,
+      "evaluation_completed": false,
+      "training_metrics": null,
+      "test_metrics": null,
+      "error": "\u274c Training failed for mtl: Input type (c10::Half) and bias type (float) should be the same"
+    }
+  },
+  "summary": {
+    "baseline": {
+      "success": false,
+      "error": "\u274c Training failed for baseline: Input type (c10::Half) and bias type (float) should be the same",
+      "key_metrics": {}
+    },
+    "mtl": {
+      "success": false,
+      "error": "\u274c Training failed for mtl: Input type (c10::Half) and bias type (float) should be the same",
+      "key_metrics": {}
+    }
+  },
+  "comparison_end_time": "2025-09-22T12:37:04.941269"
+}
