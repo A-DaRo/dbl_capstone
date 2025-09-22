@@ -95,7 +95,6 @@ class Trainer:
         It computes a full metrics report and stores per-image confusion matrices.
         """
         self.model.eval()
-        self.metrics_calculator.reset()
         
         inferrer = SlidingWindowInferrer(
             model=self.model,
@@ -109,28 +108,12 @@ class Trainer:
         with torch.no_grad():
             for batch in loop:
                 # The validation loader yields batches of full images.
-                # The `original_mask` and `image_id` are now essential.
-                batch_images = batch['image']
-                original_masks = batch['original_mask'].to(self.device)
+                batch_images = batch['image'].to(self.device, non_blocking=True)
+                original_masks = batch['original_mask'].to(self.device, non_blocking=True)
                 image_ids = batch['image_id']
 
-                # Perform inference on the batch of full-size images
-                # Note: We need to loop through each image in the batch since predict takes single images
-                batch_predictions = {}
-                for idx, single_image in enumerate(batch_images):
-                    single_predictions = inferrer.predict(single_image)
-                    if idx == 0:
-                        # Initialize batch_predictions with the right structure
-                        for task_name in single_predictions:
-                            batch_predictions[task_name] = []
-                    for task_name, logits in single_predictions.items():
-                        batch_predictions[task_name].append(logits)
-                
-                # Stack predictions for batch processing
-                stitched_predictions_logits = {
-                    task_name: torch.stack(task_logits, dim=0)
-                    for task_name, task_logits in batch_predictions.items()
-                }
+                # Perform inference on the entire batch of full-size images at once
+                stitched_predictions_logits = inferrer.predict(batch_images)
 
                 # Handle different model types for metrics calculator
                 # MTL models expect dictionary, baseline models expect single tensor
@@ -145,17 +128,11 @@ class Trainer:
                 self.metrics_calculator.update(
                     predictions=predictions_for_metrics,
                     original_targets=original_masks,
-                    image_ids=image_ids
+                    image_ids=image_ids,
+                    epoch=epoch # Pass epoch for direct-to-disk storage
                 )
         
-        # After the loop, store all buffered per-image CMs from this epoch
-        for img_id, cms, predictions in self.metrics_calculator.per_image_cms_buffer:
-            self.metrics_storer.store_per_image_cms(img_id, cms, predictions, is_testing=False, epoch=epoch)
-        
-        # Clear the buffer in preparation for the next validation epoch
-        self.metrics_calculator.per_image_cms_buffer.clear()
-        
-        # Finally, compute the aggregate metrics for the entire validation set
+        # After the loop, compute the aggregate metrics for the entire validation set
         return self.metrics_calculator.compute()
 
     def _get_metric_from_report(self, report: Dict[str, Any], key_path: str) -> float:
@@ -181,6 +158,9 @@ class Trainer:
             for epoch in range(self.config.epochs):
                 print(f"\n===== Epoch {epoch+1}/{self.config.epochs} =====")
                 self._train_one_epoch()
+                
+                # Reset metrics calculator at the start of each validation epoch
+                self.metrics_calculator.reset()
                 val_metrics_report = self._validate_one_epoch(epoch + 1)
                 
                 # Store the flattened summary metrics for this epoch

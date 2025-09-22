@@ -32,9 +32,8 @@ class MetricsStorer:
     def open_for_run(self, is_testing: bool = False):
         """Opens file handles for a validation or testing run."""
         path = self.test_cm_path if is_testing else self.val_cm_path
-        # Open in write mode to clear previous run's results
-        if os.path.exists(path):
-            os.remove(path)
+        # Open in append mode. The file is now a stream; we don't clear it.
+        # Clearing, if needed, should be an explicit action outside this class.
         file_handle = open(path, 'a')
         if is_testing:
             self._test_cm_file = file_handle

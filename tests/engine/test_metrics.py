@@ -20,8 +20,17 @@ def mtl_metrics_setup(real_task_definitions):
     """Provides a MTL metrics calculator instance and dummy data using real task definitions."""
     device = torch.device('cpu')
     mtl_splitter = MTLTaskSplitter(real_task_definitions)
+    
+    # Create a dummy metrics storer for testing
+    import tempfile
+    temp_dir = tempfile.mkdtemp()
+    from coral_mtl.utils.metrics_storer import MetricsStorer
+    dummy_storer = MetricsStorer(temp_dir)
+    dummy_storer.open_for_run(is_testing=False)  # Open for validation
+    
     metrics_calc = CoralMTLMetrics(
         splitter=mtl_splitter, 
+        storer=dummy_storer,
         device=device, 
         boundary_thickness=2,
         ignore_index=255
@@ -48,8 +57,17 @@ def baseline_metrics_setup(real_task_definitions):
     """Provides a baseline metrics calculator instance and dummy data using real task definitions."""
     device = torch.device('cpu')
     base_splitter = BaseTaskSplitter(real_task_definitions)
+    
+    # Create a dummy metrics storer for testing
+    import tempfile
+    temp_dir = tempfile.mkdtemp()
+    from coral_mtl.utils.metrics_storer import MetricsStorer
+    dummy_storer = MetricsStorer(temp_dir)
+    dummy_storer.open_for_run(is_testing=False)  # Open for validation
+    
     metrics_calc = CoralMetrics(
         splitter=base_splitter, 
+        storer=dummy_storer,
         device=device,
         boundary_thickness=2,
         ignore_index=255
@@ -77,7 +95,7 @@ def test_mtl_metrics_calculator_update_compute_reset(mtl_metrics_setup):
     # 1. Update with one batch
     metrics_calc.reset()  # Initialize confusion matrices
     image_ids = ['test_image_1', 'test_image_2']
-    metrics_calc.update(preds, original_targets, image_ids)
+    metrics_calc.update(preds, original_targets, image_ids, epoch=1)
     
     # Check if confusion matrices were updated
     assert len(metrics_calc.task_cms) > 0
@@ -117,7 +135,7 @@ def test_baseline_metrics_calculator(baseline_metrics_setup):
     # Update with batch - baseline uses different signature
     metrics_calc.reset()  # Initialize confusion matrices
     image_ids = ['baseline_img_1', 'baseline_img_2']
-    metrics_calc.update(preds, original_targets, image_ids)
+    metrics_calc.update(preds, original_targets, image_ids, epoch=1)
     
     # Compute metrics
     final_metrics = metrics_calc.compute()

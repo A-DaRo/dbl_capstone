@@ -6,14 +6,38 @@ This module provides:
 """
 
 import torch
+import torch.nn.functional as F
 import numpy as np
 from typing import Dict, List, Any, Tuple
-from scipy.ndimage import binary_dilation
 from abc import ABC, abstractmethod
 from coral_mtl.utils.task_splitter import TaskSplitter
+from coral_mtl.utils.metrics_storer import MetricsStorer
 
 
 EPS = 1e-6
+
+
+def gpu_binary_dilation(binary_mask: torch.Tensor, iterations: int) -> torch.Tensor:
+    """Performs binary dilation on a GPU tensor using a 3x3 kernel."""
+    kernel = torch.ones(1, 1, 3, 3, device=binary_mask.device, dtype=torch.float32)
+    
+    # Handle both single images and batches
+    if binary_mask.dim() == 2:
+        binary_mask = binary_mask.unsqueeze(0)  # Add batch dimension
+        squeeze_batch = True
+    else:
+        squeeze_batch = False
+    
+    dilated = binary_mask.float().unsqueeze(1)  # Add channel dimension
+    for _ in range(iterations):
+        dilated = (F.conv2d(dilated, kernel, padding=1) > 0).float()
+    
+    result = dilated.squeeze(1).bool()  # Remove channel dimension
+    
+    if squeeze_batch:
+        result = result.squeeze(0)  # Remove batch dimension if we added it
+    
+    return result
 
 
 class AbstractCoralMetrics(ABC):
@@ -22,10 +46,12 @@ class AbstractCoralMetrics(ABC):
     """
     def __init__(self,
                  splitter: TaskSplitter,
+                 storer: MetricsStorer,
                  device: torch.device,
                  boundary_thickness: int = 2,
                  ignore_index: int = 255):
         self.splitter = splitter
+        self.storer = storer
         self.device = device
         self.boundary_thickness = boundary_thickness
         self.ignore_index = ignore_index
@@ -47,34 +73,64 @@ class AbstractCoralMetrics(ABC):
         }
         # Add global BIoU stats tracking
         self.global_biou_stats = {'intersection': 0.0, 'union': 0.0}
-        self.per_image_cms_buffer: List[Tuple[str, Dict[str, np.ndarray], Dict[str, np.ndarray]]] = []
+        # The buffer is no longer needed as we write directly to disk
+        # self.per_image_cms_buffer: List[Tuple[str, Dict[str, np.ndarray], Dict[str, np.ndarray]]] = []
 
     @abstractmethod
-    def update(self, predictions: Any, original_targets: torch.Tensor, image_ids: List[str]):
+    def update(self, predictions: Any, original_targets: torch.Tensor, image_ids: List[str], epoch: int):
         pass
 
-    def _update_biou_stats(self, pred_np: np.ndarray, target_np: np.ndarray, task_name: str, level: str):
+    def _update_biou_stats_gpu(self, pred_mask: torch.Tensor, target_mask: torch.Tensor, task_name: str, level: str):
+        """Calculates and accumulates BIoU stats on the GPU."""
         num_classes = len(self.splitter.hierarchical_definitions[task_name][level]['id2label'])
-        for i in range(pred_np.shape[0]):
-            for c in range(1, num_classes):
-                gt_c, pred_c = (target_np[i] == c), (pred_np[i] == c)
-                if not np.any(gt_c): continue
-                gt_boundary = binary_dilation(gt_c, iterations=self.boundary_thickness) & ~gt_c
-                pred_boundary = binary_dilation(pred_c, iterations=self.boundary_thickness) & ~pred_c
-                self.biou_stats[task_name][level]['intersection'] += np.sum(gt_boundary & pred_boundary)
-                self.biou_stats[task_name][level]['union'] += np.sum(gt_boundary | pred_boundary)
+        for c in range(1, num_classes): # Skip background
+            gt_c = (target_mask == c)
+            pred_c = (pred_mask == c)
+            
+            # Process only if there is ground truth for this class
+            if not torch.any(gt_c):
+                continue
 
-    def _update_global_biou_stats(self, global_pred_np: np.ndarray, global_target_np: np.ndarray):
-        """Update global BIoU statistics across all classes."""
-        for i in range(global_pred_np.shape[0]):
-            for c in range(1, self.splitter.num_global_classes):  # Skip background class 0
-                gt_c = (global_target_np[i] == c)
-                pred_c = (global_pred_np[i] == c)
-                if not np.any(gt_c): continue
-                gt_boundary = binary_dilation(gt_c, iterations=self.boundary_thickness) & ~gt_c
-                pred_boundary = binary_dilation(pred_c, iterations=self.boundary_thickness) & ~pred_c
-                self.global_biou_stats['intersection'] += np.sum(gt_boundary & pred_boundary)
-                self.global_biou_stats['union'] += np.sum(gt_boundary | pred_boundary)
+            gt_boundary = gpu_binary_dilation(gt_c, self.boundary_thickness) & ~gt_c
+            pred_boundary = gpu_binary_dilation(pred_c, self.boundary_thickness) & ~pred_c
+            
+            # Handle both single images and batches
+            if gt_boundary.dim() == 2:  # Single image
+                intersection = torch.sum(gt_boundary & pred_boundary)
+                union = torch.sum(gt_boundary | pred_boundary)
+            else:  # Batch
+                intersection = torch.sum(gt_boundary & pred_boundary, dim=[1, 2])
+                union = torch.sum(gt_boundary | pred_boundary, dim=[1, 2])
+                intersection = torch.sum(intersection)
+                union = torch.sum(union)
+            
+            self.biou_stats[task_name][level]['intersection'] += intersection.item()
+            self.biou_stats[task_name][level]['union'] += union.item()
+
+    def _update_global_biou_stats_gpu(self, global_pred_mask: torch.Tensor, global_target_mask: torch.Tensor):
+        """Update global BIoU statistics on the GPU."""
+        for c in range(1, self.splitter.num_global_classes):  # Skip background
+            gt_c = (global_target_mask == c)
+            pred_c = (global_pred_mask == c)
+
+            if not torch.any(gt_c):
+                continue
+
+            gt_boundary = gpu_binary_dilation(gt_c, self.boundary_thickness) & ~gt_c
+            pred_boundary = gpu_binary_dilation(pred_c, self.boundary_thickness) & ~pred_c
+
+            # Handle both single images and batches
+            if gt_boundary.dim() == 2:  # Single image
+                intersection = torch.sum(gt_boundary & pred_boundary)
+                union = torch.sum(gt_boundary | pred_boundary)
+            else:  # Batch
+                intersection = torch.sum(gt_boundary & pred_boundary, dim=[1, 2])
+                union = torch.sum(gt_boundary | pred_boundary, dim=[1, 2])
+                intersection = torch.sum(intersection)
+                union = torch.sum(union)
+
+            self.global_biou_stats['intersection'] += intersection.item()
+            self.global_biou_stats['union'] += union.item()
 
     def _compute_metrics_from_cm(self, cm: np.ndarray, class_names: List[str]) -> Dict[str, Any]:
         tp = np.diag(cm)
@@ -140,7 +196,18 @@ class AbstractCoralMetrics(ABC):
         
         # Add global metrics to optimization_metrics
         report['optimization_metrics']['global.mIoU'] = global_summary['task_summary']['mIoU']
-        report['optimization_metrics']['global.BIoU'] = self.global_biou_stats['intersection'] / (self.global_biou_stats['union'] + EPS)
+        
+        # Calculate global BIoU with better handling of edge cases
+        global_biou_intersection = self.global_biou_stats['intersection']
+        global_biou_union = self.global_biou_stats['union']
+        
+        if global_biou_union > 0:
+            global_biou = global_biou_intersection / global_biou_union
+        else:
+            # If no boundaries detected, set BIoU to 0
+            global_biou = 0.0
+        
+        report['optimization_metrics']['global.BIoU'] = global_biou
         
         # Add global TIDE metrics to optimization_metrics
         if global_summary['TIDE_errors']:
@@ -152,23 +219,21 @@ class AbstractCoralMetrics(ABC):
 
 class CoralMTLMetrics(AbstractCoralMetrics):
     """Metrics calculator for Multi-Task Learning models."""
-    def update(self, predictions: Dict[str, torch.Tensor], original_targets: torch.Tensor, image_ids: List[str]):
+    def update(self, predictions: Dict[str, torch.Tensor], original_targets: torch.Tensor, image_ids: List[str], epoch: int):
         preds = {task: torch.argmax(logits, dim=1) for task, logits in predictions.items()}
         mask = (original_targets != self.ignore_index)
         
         batch_size = original_targets.shape[0]
         global_target = self.splitter.global_mapping_torch.to(self.device)[original_targets]
 
-        # Convert predictions and targets to numpy for BIoU calculation
-        original_targets_np = original_targets.cpu().numpy()
-        global_target_np = global_target.cpu().numpy()
-        
         # Calculate global predictions for BIoU
         pred_fg = torch.zeros_like(original_targets, dtype=torch.long)
         for p in preds.values():
             pred_fg |= (p > 0)
         global_pred = pred_fg * self.splitter.global_mapping_torch.to(self.device)[original_targets]
-        global_pred_np = global_pred.cpu().numpy()
+
+        # Update BIoU stats on GPU
+        self._update_global_biou_stats_gpu(global_pred, global_target)
 
         for i in range(batch_size):
             img_id = image_ids[i]
@@ -188,52 +253,45 @@ class CoralMTLMetrics(AbstractCoralMetrics):
                     minlength=n_cls**2).reshape(n_cls, n_cls)
                 self.task_cms[task] += cm_update
                 per_image_cms[task] = cm_update.cpu().numpy()
-                
-                # Store the predicted mask for this task
                 per_image_predictions[task] = pred_ungrouped.cpu().numpy()
-                
-                # Update BIoU stats for ungrouped level
-                target_ungrouped_np = target_ungrouped.cpu().numpy()
-                pred_ungrouped_np = pred_ungrouped.cpu().numpy()
-                self._update_biou_stats(
-                    pred_ungrouped_np[None, ...], target_ungrouped_np[None, ...], 
+
+                # Update BIoU stats for this task on GPU
+                self._update_biou_stats_gpu(
+                    pred_ungrouped.unsqueeze(0), 
+                    target_ungrouped.unsqueeze(0), 
                     task, 'ungrouped'
                 )
-                
-                # Update BIoU stats for grouped level if applicable
                 if details.get('is_grouped'):
-                    grouped_mapping = details['ungrouped_to_grouped_map']
-                    target_grouped_np = grouped_mapping[target_ungrouped_np]
-                    pred_grouped_np = grouped_mapping[pred_ungrouped_np]
-                    self._update_biou_stats(
-                        pred_grouped_np[None, ...], target_grouped_np[None, ...],
+                    grouped_pred = torch.from_numpy(details['ungrouped_to_grouped_map']).to(self.device)[pred_ungrouped]
+                    grouped_target = torch.from_numpy(details['ungrouped_to_grouped_map']).to(self.device)[target_ungrouped]
+                    self._update_biou_stats_gpu(
+                        grouped_pred.unsqueeze(0), 
+                        grouped_target.unsqueeze(0), 
                         task, 'grouped'
                     )
 
             # Update Global CM
-            pred_fg = torch.zeros_like(original_targets[i], dtype=torch.long)
-            for p in preds.values():
-                pred_fg |= (p[i] > 0)
-            global_pred = pred_fg * self.splitter.global_mapping_torch.to(self.device)[original_targets[i]]
+            pred_fg_img = torch.zeros_like(original_targets[i], dtype=torch.long)
+            for p_task in preds.values():
+                pred_fg_img |= (p_task[i] > 0)
+            global_pred_img = pred_fg_img * self.splitter.global_mapping_torch.to(self.device)[original_targets[i]]
 
             n_cls_global = self.splitter.num_global_classes
             global_cm_update = torch.bincount(
-                n_cls_global * global_target[i][img_mask].long() + global_pred[img_mask].long(),
+                n_cls_global * global_target[i][img_mask].long() + global_pred_img[img_mask].long(),
                 minlength=n_cls_global**2).reshape(n_cls_global, n_cls_global)
             self.global_cm += global_cm_update
             per_image_cms['global'] = global_cm_update.cpu().numpy()
             
             # Store global prediction mask
-            per_image_predictions['global'] = global_pred.cpu().numpy()
+            per_image_predictions['global'] = global_pred_img.cpu().numpy()
             
-            self.per_image_cms_buffer.append((img_id, per_image_cms, per_image_predictions))
-        
-        # Update global BIoU stats (outside the per-image loop for efficiency)
-        self._update_global_biou_stats(global_pred_np, global_target_np)
+            # Write directly to disk instead of buffering
+            self.storer.store_per_image_cms(img_id, per_image_cms, per_image_predictions, is_testing=False, epoch=epoch)
 
 class CoralMetrics(AbstractCoralMetrics):
     """Metrics calculator for baseline (single-head) models."""
-    def update(self, predictions: torch.Tensor, original_targets: torch.Tensor, image_ids: List[str]):
+    def update(self, predictions: torch.Tensor, original_targets: torch.Tensor, image_ids: List[str], epoch: int):
         flat_preds = torch.argmax(predictions, dim=1)
         mask = (original_targets != self.ignore_index)
         
@@ -241,11 +299,8 @@ class CoralMetrics(AbstractCoralMetrics):
         global_target = self.splitter.global_mapping_torch.to(self.device)[original_targets]
         global_pred = self.splitter.global_mapping_torch.to(self.device)[original_preds]
         
-        # Convert to numpy for BIoU calculations
-        original_targets_np = original_targets.cpu().numpy()
-        original_preds_np = original_preds.cpu().numpy()
-        global_target_np = global_target.cpu().numpy()
-        global_pred_np = global_pred.cpu().numpy()
+        # Update BIoU stats on GPU
+        self._update_global_biou_stats_gpu(global_pred, global_target)
         
         batch_size = original_targets.shape[0]
         for i in range(batch_size):
@@ -259,31 +314,27 @@ class CoralMetrics(AbstractCoralMetrics):
                 mapping = torch.from_numpy(details['ungrouped']['mapping_array']).to(self.device)
                 target_ungrouped = mapping[original_targets[i]]
                 pred_ungrouped = mapping[original_preds[i]]
+                
                 n_cls = len(details['ungrouped']['id2label'])
                 cm_update = torch.bincount(
                     n_cls * target_ungrouped[img_mask].long() + pred_ungrouped[img_mask].long(),
                     minlength=n_cls**2).reshape(n_cls, n_cls)
                 self.task_cms[task] += cm_update
                 per_image_cms[task] = cm_update.cpu().numpy()
-                
-                # Store the predicted mask for this task
                 per_image_predictions[task] = pred_ungrouped.cpu().numpy()
-                
-                # Update BIoU stats for ungrouped level
-                target_ungrouped_np = target_ungrouped.cpu().numpy()
-                pred_ungrouped_np = pred_ungrouped.cpu().numpy()
-                self._update_biou_stats(
-                    pred_ungrouped_np[None, ...], target_ungrouped_np[None, ...], 
+
+                # Update BIoU stats for this task on GPU
+                self._update_biou_stats_gpu(
+                    pred_ungrouped.unsqueeze(0), 
+                    target_ungrouped.unsqueeze(0), 
                     task, 'ungrouped'
                 )
-                
-                # Update BIoU stats for grouped level if applicable
                 if details.get('is_grouped'):
-                    grouped_mapping = details['ungrouped_to_grouped_map']
-                    target_grouped_np = grouped_mapping[target_ungrouped_np]
-                    pred_grouped_np = grouped_mapping[pred_ungrouped_np]
-                    self._update_biou_stats(
-                        pred_grouped_np[None, ...], target_grouped_np[None, ...],
+                    grouped_pred = torch.from_numpy(details['ungrouped_to_grouped_map']).to(self.device)[pred_ungrouped]
+                    grouped_target = torch.from_numpy(details['ungrouped_to_grouped_map']).to(self.device)[target_ungrouped]
+                    self._update_biou_stats_gpu(
+                        grouped_pred.unsqueeze(0), 
+                        grouped_target.unsqueeze(0), 
                         task, 'grouped'
                     )
 
@@ -298,7 +349,5 @@ class CoralMetrics(AbstractCoralMetrics):
             # Store global prediction mask
             per_image_predictions['global'] = global_pred[i].cpu().numpy()
             
-            self.per_image_cms_buffer.append((img_id, per_image_cms, per_image_predictions))
-        
-        # Update global BIoU stats (outside the per-image loop for efficiency)
-        self._update_global_biou_stats(global_pred_np, global_target_np)
+            # Write directly to disk instead of buffering
+            self.storer.store_per_image_cms(img_id, per_image_cms, per_image_predictions, is_testing=False, epoch=epoch)
