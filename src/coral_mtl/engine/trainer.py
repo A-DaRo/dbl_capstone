@@ -125,15 +125,29 @@ class Trainer:
                     predictions_for_metrics = stitched_predictions_logits
 
                 # Update metrics with the required data payload
+                # Disable per-image storage during training to speed up validation
                 self.metrics_calculator.update(
                     predictions=predictions_for_metrics,
                     original_targets=original_masks,
                     image_ids=image_ids,
-                    epoch=epoch # Pass epoch for direct-to-disk storage
+                    epoch=epoch,
+                    store_per_image=False  # Skip expensive disk I/O during training
                 )
         
         # After the loop, compute the aggregate metrics for the entire validation set
         return self.metrics_calculator.compute()
+
+    def _should_validate(self, epoch):
+        """Determine if validation should run this epoch to save time."""
+        # Validate every epoch for first 3 epochs
+        if epoch <= 3:
+            return True
+        # Then every 2 epochs until epoch 10
+        elif epoch <= 10:
+            return epoch % 2 == 0
+        # Finally every 3 epochs
+        else:
+            return epoch % 3 == 0
 
     def _get_metric_from_report(self, report: Dict[str, Any], key_path: str) -> float:
         """Accesses a nested key in the report, e.g., 'tasks.genus.grouped.mIoU'"""
@@ -159,30 +173,37 @@ class Trainer:
                 print(f"\n===== Epoch {epoch+1}/{self.config.epochs} =====")
                 self._train_one_epoch()
                 
-                # Reset metrics calculator at the start of each validation epoch
-                self.metrics_calculator.reset()
-                val_metrics_report = self._validate_one_epoch(epoch + 1)
-                
-                # Store the flattened summary metrics for this epoch
-                self.metrics_storer.store_epoch_history(val_metrics_report, epoch + 1)
-                
-                # Use the specified metric from the config for model selection
-                current_metric = self._get_metric_from_report(val_metrics_report, self.config.model_selection_metric)
-                
-                print(f"Epoch {epoch+1} Summary:")
-                print(f"  Validation Metric ({self.config.model_selection_metric}): {current_metric:.4f} (Best: {max(self.best_metric, current_metric):.4f})")
+                # Only validate if scheduled (saves significant time)
+                if self._should_validate(epoch + 1):
+                    # Reset metrics calculator at the start of each validation epoch
+                    self.metrics_calculator.reset()
+                    val_metrics_report = self._validate_one_epoch(epoch + 1)
+                    
+                    # Store the flattened summary metrics for this epoch
+                    self.metrics_storer.store_epoch_history(val_metrics_report, epoch + 1)
+                    
+                    # Use the specified metric from the config for model selection
+                    current_metric = self._get_metric_from_report(val_metrics_report, self.config.model_selection_metric)
+                    
+                    print(f"Epoch {epoch+1} Summary:")
+                    print(f"  Validation Metric ({self.config.model_selection_metric}): {current_metric:.4f} (Best: {max(self.best_metric, current_metric):.4f})")
 
-                if current_metric > self.best_metric:
-                    self.best_metric = current_metric
-                    os.makedirs(self.config.output_dir, exist_ok=True)
-                    save_path = os.path.join(self.config.output_dir, "best_model.pth")
-                    torch.save(self.model.state_dict(), save_path)
-                    print(f"  >>> New best model saved to {save_path}")
+                    if current_metric > self.best_metric:
+                        self.best_metric = current_metric
+                        os.makedirs(self.config.output_dir, exist_ok=True)
+                        save_path = os.path.join(self.config.output_dir, "best_model.pth")
+                        torch.save(self.model.state_dict(), save_path)
+                        print(f"  >>> New best model saved to {save_path}")
 
-                if self.trial:
-                    self.trial.report(current_metric, epoch)
-                    if self.trial.should_prune():
-                        raise optuna.exceptions.TrialPruned()
+                    if self.trial:
+                        self.trial.report(current_metric, epoch)
+                        if self.trial.should_prune():
+                            raise optuna.exceptions.TrialPruned()
+                else:
+                    print(f"Epoch {epoch+1} Summary: Validation skipped (scheduled for every few epochs)")
+                    # Still update trial for Optuna if needed
+                    if self.trial:
+                        self.trial.report(self.best_metric, epoch)  # Report current best
         
         finally:
             # Ensure the file handle is always closed safely

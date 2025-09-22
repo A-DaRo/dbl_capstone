@@ -11,7 +11,7 @@ import numpy as np
 from typing import Dict, List, Any, Tuple
 from abc import ABC, abstractmethod
 from coral_mtl.utils.task_splitter import TaskSplitter
-from coral_mtl.utils.metrics_storer import MetricsStorer
+from coral_mtl.utils.metrics_storer import MetricsStorer, AsyncMetricsStorer
 
 
 EPS = 1e-6
@@ -49,9 +49,15 @@ class AbstractCoralMetrics(ABC):
                  storer: MetricsStorer,
                  device: torch.device,
                  boundary_thickness: int = 2,
-                 ignore_index: int = 255):
+                 ignore_index: int = 255,
+                 use_async_storage: bool = True):
         self.splitter = splitter
         self.storer = storer
+        # Create async storer if requested and regular storer is provided
+        if use_async_storage and isinstance(storer, MetricsStorer):
+            self.async_storer = AsyncMetricsStorer(storer.output_dir)
+        else:
+            self.async_storer = None
         self.device = device
         self.boundary_thickness = boundary_thickness
         self.ignore_index = ignore_index
@@ -71,10 +77,8 @@ class AbstractCoralMetrics(ABC):
                    'grouped': {'intersection': 0.0, 'union': 0.0} if details.get('is_grouped') else None}
             for task, details in self.splitter.hierarchical_definitions.items()
         }
-        # Add global BIoU stats tracking
+        # Initialize global BIoU stats with explicit float values
         self.global_biou_stats = {'intersection': 0.0, 'union': 0.0}
-        # The buffer is no longer needed as we write directly to disk
-        # self.per_image_cms_buffer: List[Tuple[str, Dict[str, np.ndarray], Dict[str, np.ndarray]]] = []
 
     @abstractmethod
     def update(self, predictions: Any, original_targets: torch.Tensor, image_ids: List[str], epoch: int):
@@ -108,7 +112,10 @@ class AbstractCoralMetrics(ABC):
             self.biou_stats[task_name][level]['union'] += union.item()
 
     def _update_global_biou_stats_gpu(self, global_pred_mask: torch.Tensor, global_target_mask: torch.Tensor):
-        """Update global BIoU statistics on the GPU."""
+        """Update global BIoU statistics on the GPU."""        
+        total_intersection = 0.0
+        total_union = 0.0
+        
         for c in range(1, self.splitter.num_global_classes):  # Skip background
             gt_c = (global_target_mask == c)
             pred_c = (global_pred_mask == c)
@@ -129,8 +136,11 @@ class AbstractCoralMetrics(ABC):
                 intersection = torch.sum(intersection)
                 union = torch.sum(union)
 
-            self.global_biou_stats['intersection'] += intersection.item()
-            self.global_biou_stats['union'] += union.item()
+            total_intersection += intersection.item()
+            total_union += union.item()
+
+        self.global_biou_stats['intersection'] += total_intersection
+        self.global_biou_stats['union'] += total_union
 
     def _compute_metrics_from_cm(self, cm: np.ndarray, class_names: List[str]) -> Dict[str, Any]:
         tp = np.diag(cm)
@@ -197,7 +207,7 @@ class AbstractCoralMetrics(ABC):
         # Add global metrics to optimization_metrics
         report['optimization_metrics']['global.mIoU'] = global_summary['task_summary']['mIoU']
         
-        # Calculate global BIoU with better handling of edge cases
+        # Calculate global BIoU with better handling and debugging
         global_biou_intersection = self.global_biou_stats['intersection']
         global_biou_union = self.global_biou_stats['union']
         
@@ -219,7 +229,7 @@ class AbstractCoralMetrics(ABC):
 
 class CoralMTLMetrics(AbstractCoralMetrics):
     """Metrics calculator for Multi-Task Learning models."""
-    def update(self, predictions: Dict[str, torch.Tensor], original_targets: torch.Tensor, image_ids: List[str], epoch: int):
+    def update(self, predictions: Dict[str, torch.Tensor], original_targets: torch.Tensor, image_ids: List[str], epoch: int, store_per_image: bool = True):
         preds = {task: torch.argmax(logits, dim=1) for task, logits in predictions.items()}
         mask = (original_targets != self.ignore_index)
         
@@ -252,8 +262,10 @@ class CoralMTLMetrics(AbstractCoralMetrics):
                     n_cls * target_ungrouped[img_mask].long() + pred_ungrouped[img_mask].long(),
                     minlength=n_cls**2).reshape(n_cls, n_cls)
                 self.task_cms[task] += cm_update
-                per_image_cms[task] = cm_update.cpu().numpy()
-                per_image_predictions[task] = pred_ungrouped.cpu().numpy()
+                
+                if store_per_image:
+                    per_image_cms[task] = cm_update.cpu().numpy()
+                    per_image_predictions[task] = pred_ungrouped.cpu().numpy()
 
                 # Update BIoU stats for this task on GPU
                 self._update_biou_stats_gpu(
@@ -281,17 +293,20 @@ class CoralMTLMetrics(AbstractCoralMetrics):
                 n_cls_global * global_target[i][img_mask].long() + global_pred_img[img_mask].long(),
                 minlength=n_cls_global**2).reshape(n_cls_global, n_cls_global)
             self.global_cm += global_cm_update
-            per_image_cms['global'] = global_cm_update.cpu().numpy()
             
-            # Store global prediction mask
-            per_image_predictions['global'] = global_pred_img.cpu().numpy()
-            
-            # Write directly to disk instead of buffering
-            self.storer.store_per_image_cms(img_id, per_image_cms, per_image_predictions, is_testing=False, epoch=epoch)
+            if store_per_image:
+                per_image_cms['global'] = global_cm_update.cpu().numpy()
+                per_image_predictions['global'] = global_pred_img.cpu().numpy()
+                
+                # Use async storage if available, otherwise fallback to sync
+                if self.async_storer:
+                    self.async_storer.store_per_image_cms(img_id, per_image_cms, per_image_predictions, is_testing=False, epoch=epoch)
+                else:
+                    self.storer.store_per_image_cms(img_id, per_image_cms, per_image_predictions, is_testing=False, epoch=epoch)
 
 class CoralMetrics(AbstractCoralMetrics):
     """Metrics calculator for baseline (single-head) models."""
-    def update(self, predictions: torch.Tensor, original_targets: torch.Tensor, image_ids: List[str], epoch: int):
+    def update(self, predictions: torch.Tensor, original_targets: torch.Tensor, image_ids: List[str], epoch: int, store_per_image: bool = True):
         flat_preds = torch.argmax(predictions, dim=1)
         mask = (original_targets != self.ignore_index)
         
@@ -320,8 +335,10 @@ class CoralMetrics(AbstractCoralMetrics):
                     n_cls * target_ungrouped[img_mask].long() + pred_ungrouped[img_mask].long(),
                     minlength=n_cls**2).reshape(n_cls, n_cls)
                 self.task_cms[task] += cm_update
-                per_image_cms[task] = cm_update.cpu().numpy()
-                per_image_predictions[task] = pred_ungrouped.cpu().numpy()
+                
+                if store_per_image:
+                    per_image_cms[task] = cm_update.cpu().numpy()
+                    per_image_predictions[task] = pred_ungrouped.cpu().numpy()
 
                 # Update BIoU stats for this task on GPU
                 self._update_biou_stats_gpu(
@@ -344,10 +361,13 @@ class CoralMetrics(AbstractCoralMetrics):
                 n_cls_global * global_target[i][img_mask].long() + global_pred[i][img_mask].long(),
                 minlength=n_cls_global**2).reshape(n_cls_global, n_cls_global)
             self.global_cm += global_cm_update
-            per_image_cms['global'] = global_cm_update.cpu().numpy()
             
-            # Store global prediction mask
-            per_image_predictions['global'] = global_pred[i].cpu().numpy()
-            
-            # Write directly to disk instead of buffering
-            self.storer.store_per_image_cms(img_id, per_image_cms, per_image_predictions, is_testing=False, epoch=epoch)
+            if store_per_image:
+                per_image_cms['global'] = global_cm_update.cpu().numpy()
+                per_image_predictions['global'] = global_pred[i].cpu().numpy()
+                
+                # Use async storage if available, otherwise fallback to sync
+                if self.async_storer:
+                    self.async_storer.store_per_image_cms(img_id, per_image_cms, per_image_predictions, is_testing=False, epoch=epoch)
+                else:
+                    self.storer.store_per_image_cms(img_id, per_image_cms, per_image_predictions, is_testing=False, epoch=epoch)

@@ -32,7 +32,7 @@ data:
   task_definitions_path: "configs/task_definitions.yaml"
   
   # Parameters for the final DataLoader object.
-  batch_size: 8
+  batch_size: 16
   num_workers: 4
   
   # A fundamental parameter shared by datasets and augmentations.
@@ -88,6 +88,9 @@ metrics:
   # The class index to be ignored during metric calculation.
   # This should be consistent with the ignore_index in the loss function.
   ignore_index: 0
+  
+  # Enable asynchronous storage to prevent blocking during per-image storage
+  use_async_storage: true
 
 
 # --------------------------------------------------------------------------
@@ -114,11 +117,12 @@ trainer:
   model_selection_metric: "global.BIoU"
   
   # --- Parameters for the SlidingWindowInferrer used during validation ---
-  # The step size for the sliding window. A stride of patch_size/2 creates 50% overlap.
-  inference_stride: 256
+  # The step size for the sliding window. Optimized for 33% overlap (balance of speed/accuracy)  
+  inference_stride: 341
   
   # The number of patches to process in a single batch during validation inference.
-  inference_batch_size: 16
+  # Increased from 16 to 24 for better GPU utilization
+  inference_batch_size: 24
 
 # --------------------------------------------------------------------------
 # Configuration for the Evaluator Engine
@@ -132,3 +136,8 @@ evaluator:
   # Optional: Specify a dedicated directory for evaluation artifacts.
   # If null, it defaults to a subfolder named 'evaluation' within trainer.output_dir.
   output_dir: null
+  
+  # Evaluator-specific inference settings (optimized for thorough testing)
+  # Use slightly more conservative settings for final evaluation to ensure accuracy
+  inference_stride: 320  # ~37% overlap for more thorough coverage  
+  inference_batch_size: 20  # Slightly smaller batch for stability during testing

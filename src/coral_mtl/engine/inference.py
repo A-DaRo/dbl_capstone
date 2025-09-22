@@ -69,9 +69,11 @@ class SlidingWindowInferrer:
         # --- Step 3: Batched Inference Loop (Spec Section 8.3, predict method, step 3) ---
         all_patch_logits = {}
         for i in range(0, num_patches, self.batch_size):
-            batch_patches = patches[i:i + self.batch_size].to(self.device)
+            batch_patches = patches[i:i + self.batch_size].to(self.device, non_blocking=True)
 
-            model_output = self.model(batch_patches)
+            # Use mixed precision for faster inference and lower memory usage
+            with torch.cuda.amp.autocast():
+                model_output = self.model(batch_patches)
 
             # Standardize model output to handle both MTL and non-MTL cases
             if isinstance(model_output, torch.Tensor):
@@ -79,14 +81,13 @@ class SlidingWindowInferrer:
 
             for task_name, logits in model_output.items():
                 if task_name not in all_patch_logits:
-                    # Move logits to CPU immediately to free up GPU VRAM, as stitching is done later
                     all_patch_logits[task_name] = []
-                all_patch_logits[task_name].append(logits.cpu())
+                all_patch_logits[task_name].append(logits)
 
         for task_name, logits_list in all_patch_logits.items():
             all_patch_logits[task_name] = torch.cat(logits_list, dim=0)
 
-        # --- Step 4: Stitching (Now fully batched) ---
+        # --- Step 4: Stitching (Now fully batched and on GPU) ---
         final_logits = self._stitch_patches(all_patch_logits, patch_coords,
                                             (padded_h, padded_w), images.shape[0])
 

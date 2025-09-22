@@ -120,16 +120,10 @@ class Evaluator:
                     self.metrics_calculator.update(
                         predictions=predictions_for_metrics,
                         original_targets=original_masks,
-                        image_ids=image_ids
+                        image_ids=image_ids,
+                        epoch=0,  # Test evaluation doesn't have epochs
+                        store_per_image=True  # Enable per-image storage for test evaluation
                     )
-                    
-                    # After updating, the calculator's buffer holds the per-image CMs for this batch.
-                    # We store them immediately to keep memory usage low.
-                    for img_id, cms, predictions in self.metrics_calculator.per_image_cms_buffer:
-                        self.metrics_storer.store_per_image_cms(img_id, cms, predictions, is_testing=True)
-                    
-                    # Clear the buffer after storing
-                    self.metrics_calculator.per_image_cms_buffer.clear()
 
         finally:
             # Ensure the file handle is always closed, even if errors occur

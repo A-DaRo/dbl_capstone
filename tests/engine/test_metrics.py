@@ -33,7 +33,8 @@ def mtl_metrics_setup(real_task_definitions):
         storer=dummy_storer,
         device=device, 
         boundary_thickness=2,
-        ignore_index=255
+        ignore_index=255,
+        use_async_storage=False  # Disable async for tests
     )
     
     B, H, W = 2, 64, 64
@@ -70,7 +71,8 @@ def baseline_metrics_setup(real_task_definitions):
         storer=dummy_storer,
         device=device,
         boundary_thickness=2,
-        ignore_index=255
+        ignore_index=255,
+        use_async_storage=False  # Disable async for tests
     )
     
     B, H, W = 2, 64, 64
@@ -95,7 +97,7 @@ def test_mtl_metrics_calculator_update_compute_reset(mtl_metrics_setup):
     # 1. Update with one batch
     metrics_calc.reset()  # Initialize confusion matrices
     image_ids = ['test_image_1', 'test_image_2']
-    metrics_calc.update(preds, original_targets, image_ids, epoch=1)
+    metrics_calc.update(preds, original_targets, image_ids, epoch=1, store_per_image=True)
     
     # Check if confusion matrices were updated
     assert len(metrics_calc.task_cms) > 0
@@ -135,7 +137,7 @@ def test_baseline_metrics_calculator(baseline_metrics_setup):
     # Update with batch - baseline uses different signature
     metrics_calc.reset()  # Initialize confusion matrices
     image_ids = ['baseline_img_1', 'baseline_img_2']
-    metrics_calc.update(preds, original_targets, image_ids, epoch=1)
+    metrics_calc.update(preds, original_targets, image_ids, epoch=1, store_per_image=True)
     
     # Compute metrics
     final_metrics = metrics_calc.compute()

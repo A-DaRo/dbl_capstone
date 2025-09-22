@@ -393,7 +393,8 @@ class ExperimentFactory:
             'storer': self.get_metrics_storer(),  # Add the storer parameter
             'device': device,
             'boundary_thickness': metrics_config.get('boundary_thickness', 2),
-            'ignore_index': self.config.get('data', {}).get('ignore_index', 255)
+            'ignore_index': self.config.get('data', {}).get('ignore_index', 255),
+            'use_async_storage': metrics_config.get('use_async_storage', True)  # Enable async storage by default
         }
 
         if model_type == "CoralMTL":

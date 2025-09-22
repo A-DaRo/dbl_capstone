@@ -3,13 +3,17 @@ Metrics storage utilities for coral segmentation tasks.
 This module provides:
     A MetricsStorer class to handle persistent storage of epoch-wise history
     and per-image, raw confusion matrices for detailed analysis.
+    An AsyncMetricsStorer for background, non-blocking storage operations.
 """
 
 
 import numpy as np
 import json
 import os
-from typing import Dict, List, Any, Tuple
+import threading
+import queue
+import atexit
+from typing import Dict, List, Any, Tuple, Optional
 
 
 
@@ -108,3 +112,168 @@ class MetricsStorer:
         report_path = os.path.join(self.output_dir, filename)
         with open(report_path, 'w') as f:
             json.dump(metrics_report, f, indent=2)
+
+
+class AsyncMetricsStorer:
+    """
+    Asynchronous metrics storage that performs I/O operations in a background thread.
+    This prevents blocking during validation loops while maintaining per-image storage capability.
+    """
+    
+    def __init__(self, output_dir: str):
+        self.output_dir = output_dir
+        os.makedirs(self.output_dir, exist_ok=True)
+        
+        # Storage queue and worker thread
+        self._storage_queue = queue.Queue()
+        self._worker_thread: Optional[threading.Thread] = None
+        self._shutdown_event = threading.Event()
+        self._active_files: Dict[str, Any] = {}
+        
+        # Register cleanup on exit
+        atexit.register(self.shutdown)
+    
+    def _start_worker_if_needed(self):
+        """Start the background worker thread if not already running."""
+        if self._worker_thread is None or not self._worker_thread.is_alive():
+            self._shutdown_event.clear()
+            self._worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
+            self._worker_thread.start()
+    
+    def _worker_loop(self):
+        """Background worker thread that processes storage operations."""
+        while not self._shutdown_event.is_set():
+            try:
+                # Wait for storage tasks with timeout to check shutdown periodically
+                task = self._storage_queue.get(timeout=1.0)
+                if task is None:  # Shutdown signal
+                    break
+                
+                # Process the storage task
+                self._process_storage_task(task)
+                self._storage_queue.task_done()
+                
+            except queue.Empty:
+                continue  # Check shutdown and continue
+            except Exception as e:
+                print(f"AsyncMetricsStorer worker error: {e}")
+                # Continue processing other tasks
+    
+    def _process_storage_task(self, task: Dict[str, Any]):
+        """Process a single storage task."""
+        task_type = task['type']
+        
+        if task_type == 'open_file':
+            path = task['path']
+            is_testing = task['is_testing']
+            file_handle = open(path, 'a')
+            key = 'test' if is_testing else 'val'
+            self._active_files[key] = file_handle
+            
+        elif task_type == 'store_per_image':
+            is_testing = task['is_testing']
+            key = 'test' if is_testing else 'val'
+            file_handle = self._active_files.get(key)
+            
+            if file_handle:
+                # Convert numpy arrays to lists in background thread
+                confusion_matrices = task['confusion_matrices']
+                predicted_masks = task.get('predicted_masks')
+                
+                serializable_cms = {
+                    task_name: cm.tolist() if isinstance(cm, np.ndarray) else cm
+                    for task_name, cm in confusion_matrices.items()
+                }
+                
+                record = {
+                    "image_id": task['image_id'],
+                    "confusion_matrices": serializable_cms,
+                    "epoch": task.get('epoch')
+                }
+                
+                if predicted_masks:
+                    serializable_predictions = {
+                        task_name: pred.tolist() if isinstance(pred, np.ndarray) else pred
+                        for task_name, pred in predicted_masks.items()
+                    }
+                    record["predicted_masks"] = serializable_predictions
+                
+                file_handle.write(json.dumps(record) + '\n')
+                file_handle.flush()  # Ensure data is written
+                
+        elif task_type == 'close_files':
+            for file_handle in self._active_files.values():
+                if file_handle:
+                    file_handle.close()
+            self._active_files.clear()
+            
+        elif task_type == 'save_report':
+            report_path = os.path.join(self.output_dir, task['filename'])
+            temp_path = report_path + ".tmp"
+            with open(temp_path, 'w') as f:
+                json.dump(task['metrics_report'], f, indent=2)
+            os.replace(temp_path, report_path)
+    
+    def open_for_run(self, is_testing: bool = False):
+        """Opens file handles for a validation or testing run asynchronously."""
+        self._start_worker_if_needed()
+        
+        path = os.path.join(self.output_dir, "test_cms.jsonl" if is_testing else "validation_cms.jsonl")
+        task = {
+            'type': 'open_file',
+            'path': path,
+            'is_testing': is_testing
+        }
+        self._storage_queue.put(task)
+    
+    def store_per_image_cms(self, image_id: str, confusion_matrices: Dict[str, np.ndarray], 
+                           predicted_masks: Dict[str, np.ndarray] = None, 
+                           is_testing: bool = False, epoch: int = None):
+        """Stores per-image confusion matrices asynchronously (non-blocking)."""
+        self._start_worker_if_needed()
+        
+        # Defer numpy array conversion to background thread to avoid blocking
+        task = {
+            'type': 'store_per_image',
+            'image_id': image_id,
+            'confusion_matrices': confusion_matrices,  # Keep as numpy arrays
+            'predicted_masks': predicted_masks,        # Keep as numpy arrays
+            'is_testing': is_testing,
+            'epoch': epoch
+        }
+        self._storage_queue.put(task)
+    
+    def save_final_report(self, metrics_report: Dict[str, Any], filename: str):
+        """Saves the final metrics report asynchronously."""
+        self._start_worker_if_needed()
+        
+        task = {
+            'type': 'save_report',
+            'metrics_report': metrics_report,
+            'filename': filename
+        }
+        self._storage_queue.put(task)
+    
+    def close(self):
+        """Close file handles asynchronously."""
+        if self._worker_thread and self._worker_thread.is_alive():
+            task = {'type': 'close_files'}
+            self._storage_queue.put(task)
+    
+    def shutdown(self):
+        """Shutdown the async storer and wait for all tasks to complete."""
+        if self._worker_thread and self._worker_thread.is_alive():
+            # Signal shutdown and wait for queue to empty
+            self._storage_queue.put(None)  # Shutdown signal
+            self._shutdown_event.set()
+            
+            # Wait for remaining tasks to complete with timeout
+            try:
+                self._worker_thread.join(timeout=5.0)
+            except:
+                pass
+    
+    def wait_for_completion(self):
+        """Wait for all pending storage operations to complete."""
+        if self._worker_thread and self._worker_thread.is_alive():
+            self._storage_queue.join()
