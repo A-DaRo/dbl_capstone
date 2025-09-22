@@ -43,8 +43,8 @@ class Evaluator:
         self.metrics_calculator = metrics_calculator
         self.metrics_storer = metrics_storer
         self.config = config
-        self.device = torch.device(config.DEVICE)
-        self.output_dir = Path(config.OUTPUT_DIR)
+        self.device = torch.device(config.device)
+        self.output_dir = Path(config.output_dir)
 
     def evaluate(self) -> Dict[str, Any]:
         """
@@ -59,18 +59,18 @@ class Evaluator:
             Dict[str, Any]: The final, nested dictionary of computed metrics.
         """
         # --- Step 1: Load Best Model ---
-        print(f"Loading best model checkpoint from: {self.config.CHECKPOINT_PATH}")
-        self.model.load_state_dict(torch.load(self.config.CHECKPOINT_PATH, map_location=self.device))
+        print(f"Loading best model checkpoint from: {self.config.checkpoint_path}")
+        self.model.load_state_dict(torch.load(self.config.checkpoint_path, map_location=self.device))
         self.model.to(self.device)
         self.model.eval()
 
         # --- Step 2: Initialize Sliding Window Inferrer ---
         inferrer = SlidingWindowInferrer(
             model=self.model,
-            patch_size=self.config.PATCH_SIZE,
-            stride=self.config.INFERENCE_STRIDE,
+            patch_size=self.config.patch_size,
+            stride=self.config.inference_stride,
             device=self.device,
-            batch_size=self.config.INFERENCE_BATCH_SIZE
+            batch_size=self.config.inference_batch_size
         )
 
         # --- Step 3: Evaluation Loop ---

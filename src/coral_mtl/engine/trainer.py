@@ -32,8 +32,8 @@ class Trainer:
         self.config = config
         self.trial = trial # For Optuna integration
         
-        self.device = config.DEVICE
-        self.output_dir = Path(config.OUTPUT_DIR)
+        self.device = torch.device(config.device)
+        self.output_dir = Path(config.output_dir)
         self.scaler = torch.amp.GradScaler(enabled=(self.device.type == 'cuda'))
         
         self.best_metric = -1.0
@@ -70,18 +70,18 @@ class Trainer:
                     self.training_log['total_loss'].append(total_loss.item())
                 
                 # Handle gradient accumulation
-                total_loss = total_loss / self.config.GRADIENT_ACCUMULATION_STEPS
+                total_loss = total_loss / self.config.gradient_accumulation_steps
 
             self.scaler.scale(total_loss).backward()
 
-            if (i + 1) % self.config.GRADIENT_ACCUMULATION_STEPS == 0 or (i + 1) == len(self.train_loader):
+            if (i + 1) % self.config.gradient_accumulation_steps == 0 or (i + 1) == len(self.train_loader):
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
                 self.optimizer.zero_grad()
                 self.scheduler.step()
 
             self.training_log['lr'].append(self.scheduler.get_last_lr()[0])
-            loop.set_postfix(loss=(total_loss.item() * self.config.GRADIENT_ACCUMULATION_STEPS))
+            loop.set_postfix(loss=(total_loss.item() * self.config.gradient_accumulation_steps))
 
     def _validate_one_epoch(self, epoch: int = None) -> Dict[str, Any]:
         """
@@ -93,10 +93,10 @@ class Trainer:
         
         inferrer = SlidingWindowInferrer(
             model=self.model,
-            patch_size=self.config.PATCH_SIZE,
-            stride=self.config.INFERENCE_STRIDE,
+            patch_size=self.config.patch_size,
+            stride=self.config.inference_stride,
             device=self.device,
-            batch_size=self.config.INFERENCE_BATCH_SIZE
+            batch_size=self.config.inference_batch_size
         )
         
         loop = tqdm(self.val_loader, desc=f"Validation", leave=False)
@@ -157,14 +157,14 @@ class Trainer:
 
     def train(self):
         """The main training loop orchestrating epochs, validation, and checkpointing."""
-        print(f"--- Starting Training for {self.config.NUM_EPOCHS} epochs ---")
+        print(f"--- Starting Training for {self.config.epochs} epochs ---")
         
         try:
             # Open the JSONL file handle once for the entire training run
             self.metrics_storer.open_for_run(is_testing=False)
             
-            for epoch in range(self.config.NUM_EPOCHS):
-                print(f"\n===== Epoch {epoch+1}/{self.config.NUM_EPOCHS} =====")
+            for epoch in range(self.config.epochs):
+                print(f"\n===== Epoch {epoch+1}/{self.config.epochs} =====")
                 self._train_one_epoch()
                 val_metrics_report = self._validate_one_epoch(epoch + 1)
                 
@@ -172,15 +172,15 @@ class Trainer:
                 self.metrics_storer.store_epoch_history(val_metrics_report, epoch + 1)
                 
                 # Use the specified metric from the config for model selection
-                current_metric = self._get_metric_from_report(val_metrics_report, self.config.MODEL_SELECTION_METRIC)
+                current_metric = self._get_metric_from_report(val_metrics_report, self.config.model_selection_metric)
                 
                 print(f"Epoch {epoch+1} Summary:")
-                print(f"  Validation Metric ({self.config.MODEL_SELECTION_METRIC}): {current_metric:.4f} (Best: {max(self.best_metric, current_metric):.4f})")
+                print(f"  Validation Metric ({self.config.model_selection_metric}): {current_metric:.4f} (Best: {max(self.best_metric, current_metric):.4f})")
 
                 if current_metric > self.best_metric:
                     self.best_metric = current_metric
-                    os.makedirs(self.config.OUTPUT_DIR, exist_ok=True)
-                    save_path = os.path.join(self.config.OUTPUT_DIR, "best_model.pth")
+                    os.makedirs(self.config.output_dir, exist_ok=True)
+                    save_path = os.path.join(self.config.output_dir, "best_model.pth")
                     torch.save(self.model.state_dict(), save_path)
                     print(f"  >>> New best model saved to {save_path}")
 
