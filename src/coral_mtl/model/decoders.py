@@ -134,36 +134,40 @@ class HierarchicalContextAwareDecoder(nn.Module):
 
         fused_channels = decoder_channel * 4
 
-        # Asymmetric Decoder Heads
-        self.decoders = nn.ModuleDict({
-            'genus': MLP(fused_channels, decoder_channel),
-            'health': MLP(fused_channels, decoder_channel),
-            'fish': nn.Conv2d(fused_channels, decoder_channel, kernel_size=1),
-            'human_artifacts': nn.Conv2d(fused_channels, decoder_channel, kernel_size=1),
-            'substrate': nn.Conv2d(fused_channels, decoder_channel, kernel_size=1)
-        })
+        # Dynamic Decoder Heads - create decoders for all requested tasks
+        self.decoders = nn.ModuleDict()
+        for task in self.tasks:
+            if task in num_classes:
+                # Use MLP for primary tasks, Conv2d for auxiliary tasks
+                if task in primary_tasks:
+                    self.decoders[task] = MLP(fused_channels, decoder_channel)
+                else:
+                    self.decoders[task] = nn.Conv2d(fused_channels, decoder_channel, kernel_size=1)
+            else:
+                print(f"Warning: Task '{task}' not found in num_classes. Skipping decoder creation.")
 
         # Projections for Cross-Attention Module
         self.to_qkv = nn.ModuleDict()
         for task in self.tasks:
-            self.to_qkv[task] = nn.ModuleList([
-                nn.Conv2d(decoder_channel, attention_dim, 1, bias=False), # Query
-                nn.Conv2d(decoder_channel, attention_dim, 1, bias=False), # Key
-                nn.Conv2d(decoder_channel, attention_dim, 1, bias=False)  # Value
-            ])
+            if task in self.decoders:  # Only create attention layers for tasks with decoders
+                self.to_qkv[task] = nn.ModuleList([
+                    nn.Conv2d(decoder_channel, attention_dim, 1, bias=False), # Query
+                    nn.Conv2d(decoder_channel, attention_dim, 1, bias=False), # Key
+                    nn.Conv2d(decoder_channel, attention_dim, 1, bias=False)  # Value
+                ])
 
         self.context_pool = nn.AvgPool2d(kernel_size=4, stride=4)
         
-        self.attn_proj = nn.ModuleDict({
-            task: MLP(attention_dim, decoder_channel) for task in self.primary_tasks
-        })
-
-        self.gating_layers = nn.ModuleDict({
-            task: nn.Sequential(
-                nn.Conv2d(decoder_channel, 1, kernel_size=1),
-                nn.Sigmoid()
-            ) for task in self.primary_tasks
-        })
+        # Only create attention and gating layers for primary tasks that have decoders
+        self.attn_proj = nn.ModuleDict()
+        self.gating_layers = nn.ModuleDict()
+        for task in self.primary_tasks:
+            if task in self.decoders:
+                self.attn_proj[task] = MLP(attention_dim, decoder_channel)
+                self.gating_layers[task] = nn.Sequential(
+                    nn.Conv2d(decoder_channel, 1, kernel_size=1),
+                    nn.Sigmoid()
+                )
 
         # Final Prediction Layers
         self.predictors = nn.ModuleDict({
@@ -186,8 +190,9 @@ class HierarchicalContextAwareDecoder(nn.Module):
         q = self.to_qkv[query_task][0](decoded_features[query_task]).flatten(2).transpose(1, 2)
 
         context_keys, context_values = [], []
+        # Only iterate over tasks that have decoders and exist in decoded_features
         for task in self.tasks:
-            if task != query_task:
+            if task != query_task and task in decoded_features and task in self.to_qkv:
                 context_feature = self.context_pool(decoded_features[task])
                 k_task = self.to_qkv[task][1](context_feature).flatten(2).transpose(1, 2)
                 v_task = self.to_qkv[task][2](context_feature).flatten(2).transpose(1, 2)
@@ -205,21 +210,31 @@ class HierarchicalContextAwareDecoder(nn.Module):
         fused_features = self._fuse_encoder_features(features)
         decoded_features = {task: decoder(fused_features) for task, decoder in self.decoders.items()}
 
-        enriched_features = {
-            task: self._perform_cross_attention(task, decoded_features)
-            for task in self.primary_tasks
-        }
+        # Only perform cross-attention for primary tasks that have decoders and attention layers
+        enriched_features = {}
+        for task in self.primary_tasks:
+            if task in decoded_features and task in self.attn_proj:
+                enriched_features[task] = self._perform_cross_attention(task, decoded_features)
 
         logits = {}
+        # Process primary tasks with attention
         for task in self.primary_tasks:
-            f_original = decoded_features[task]
-            f_projected_enrichment = self.attn_proj[task](enriched_features[task])
-            gate = self.gating_layers[task](f_original)
-            final_feature = (gate * f_original) + ((1 - gate) * f_projected_enrichment)
-            logits[task] = self.predictors[task](final_feature)
+            if task in decoded_features and task in self.predictors:
+                if task in enriched_features and task in self.attn_proj and task in self.gating_layers:
+                    # Use attention for primary tasks
+                    f_original = decoded_features[task]
+                    f_projected_enrichment = self.attn_proj[task](enriched_features[task])
+                    gate = self.gating_layers[task](f_original)
+                    final_feature = (gate * f_original) + ((1 - gate) * f_projected_enrichment)
+                    logits[task] = self.predictors[task](final_feature)
+                else:
+                    # Fallback to direct prediction if attention layers not available
+                    logits[task] = self.predictors[task](decoded_features[task])
 
+        # Process auxiliary tasks without attention
         for task in self.aux_tasks:
-            logits[task] = self.predictors[task](decoded_features[task])
+            if task in decoded_features and task in self.predictors:
+                logits[task] = self.predictors[task](decoded_features[task])
 
         target_size = features[0].shape[2:]
         for task, logit in logits.items():
