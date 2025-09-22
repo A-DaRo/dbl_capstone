@@ -150,8 +150,13 @@ class Trainer:
             return epoch % 3 == 0
 
     def _get_metric_from_report(self, report: Dict[str, Any], key_path: str) -> float:
-        """Accesses a nested key in the report, e.g., 'tasks.genus.grouped.mIoU'"""
+        """Accesses a nested key in the report, e.g., 'tasks.genus.grouped.mIoU' or 'global.BIoU'"""
         try:
+            # First check if the metric is in optimization_metrics (the flat dictionary)
+            if 'optimization_metrics' in report and key_path in report['optimization_metrics']:
+                return report['optimization_metrics'][key_path]
+            
+            # If not found in optimization_metrics, try the old nested approach
             keys = key_path.split('.')
             value = report
             for key in keys:

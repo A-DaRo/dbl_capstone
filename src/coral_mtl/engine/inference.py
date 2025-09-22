@@ -72,7 +72,7 @@ class SlidingWindowInferrer:
             batch_patches = patches[i:i + self.batch_size].to(self.device, non_blocking=True)
 
             # Use mixed precision for faster inference and lower memory usage
-            with torch.cuda.amp.autocast():
+            with torch.amp.autocast('cuda'):
                 model_output = self.model(batch_patches)
 
             # Standardize model output to handle both MTL and non-MTL cases
