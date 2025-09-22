@@ -48,12 +48,21 @@ class AbstractCoralscapesDataset(Dataset, ABC):
             
         # Default transform for validation/testing if no augmentations are provided
         if self.augmentations is None:
-            self.default_transform = v2.Compose([
-                v2.Resize((self.patch_size, self.patch_size), antialias=True),
-                v2.ToImage(),
-                v2.ToDtype(torch.float32, scale=True),
-                v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            ])
+            if self.split == 'train':
+                # For training, resize to patch_size (in case no augmentations)
+                self.default_transform = v2.Compose([
+                    v2.Resize((self.patch_size, self.patch_size), antialias=True),
+                    v2.ToImage(),
+                    v2.ToDtype(torch.float32, scale=True),
+                    v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                ])
+            else:
+                # For validation/test, keep original resolution for sliding window inference
+                self.default_transform = v2.Compose([
+                    v2.ToImage(),
+                    v2.ToDtype(torch.float32, scale=True),
+                    v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                ])
 
     def _load_local_paths(self, data_root_path: Optional[str], pds_train_path: Optional[str]):
         """
@@ -165,13 +174,17 @@ class CoralscapesMTLDataset(AbstractCoralscapesDataset):
             final_image, final_masks = self.augmentations(original_image, target_masks_pil)
         else:
             final_image = self.default_transform(original_image)
-            final_masks = {
-                task_name: torch.from_numpy(np.array(v2.functional.resize(
-                    mask_pil, (self.patch_size, self.patch_size), 
-                    interpolation=v2.InterpolationMode.NEAREST
-                ))).long()
-                for task_name, mask_pil in target_masks_pil.items()
-            }
+            final_masks = {}
+            for task_name, mask_pil in target_masks_pil.items():
+                if self.split == 'train':
+                    # For training, resize mask to patch_size
+                    final_masks[task_name] = torch.from_numpy(np.array(v2.functional.resize(
+                        mask_pil, (self.patch_size, self.patch_size), 
+                        interpolation=v2.InterpolationMode.NEAREST
+                    ))).long()
+                else:
+                    # For validation/test, keep mask at original resolution
+                    final_masks[task_name] = torch.from_numpy(np.array(mask_pil)).long()
 
         return {
             'image': final_image,
@@ -207,10 +220,15 @@ class CoralscapesDataset(AbstractCoralscapesDataset):
             final_mask = final_masks_dict['mask']
         else:
             final_image = self.default_transform(original_image)
-            final_mask = torch.from_numpy(np.array(v2.functional.resize(
-                target_mask_pil, (self.patch_size, self.patch_size), 
-                interpolation=v2.InterpolationMode.NEAREST
-            ))).long()
+            if self.split == 'train':
+                # For training, resize mask to patch_size
+                final_mask = torch.from_numpy(np.array(v2.functional.resize(
+                    target_mask_pil, (self.patch_size, self.patch_size), 
+                    interpolation=v2.InterpolationMode.NEAREST
+                ))).long()
+            else:
+                # For validation/test, keep mask at original resolution
+                final_mask = torch.from_numpy(flattened_mask_np).long()
 
         return {
             'image': final_image,
