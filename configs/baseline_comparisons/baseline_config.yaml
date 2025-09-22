@@ -32,7 +32,7 @@ data:
   task_definitions_path: "configs/task_definitions.yaml"
   
   # Parameters for the final DataLoader object.
-  batch_size: 4
+  batch_size: 8
   num_workers: 4
   
   # A fundamental parameter shared by datasets and augmentations.
@@ -98,13 +98,13 @@ trainer:
   device: "cuda"
   
   # Total number of epochs for the training run.
-  epochs: 100
+  epochs: 50
   
   # Directory where checkpoints, logs, and other artifacts will be saved.
   output_dir: "experiments/baseline_comparisons/coral_baseline_b2_run"
   
   # Number of steps to accumulate gradients before performing an optimizer step.
-  gradient_accumulation_steps: 2
+  gradient_accumulation_steps: 4
   
   # Enable mixed precision training (FP16) for faster training on compatible hardware
   use_mixed_precision: true
