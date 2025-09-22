@@ -1,10 +1,326 @@
 # Theoretical Specification
 
-This document outlines the theoretical foundations, design principles, and high-level goals of the Coral-MTL project. It delves into the "why" behind our architectural and methodological choices, framing the project within the broader context of computer vision and ecological research. For a detailed guide on the technical implementation, class structures, and code, please see the [**Technical Specification**](./technical_specification.md).
+This document provides a comprehensive theoretical foundation for the Coral-MTL project, exploring the deep learning principles, computer vision methodologies, and ecological research motivations that drive our design decisions. It establishes the theoretical framework for hierarchical multi-task learning in marine ecosystem analysis and positions our contributions within the broader scientific context.
+
+For detailed technical implementation, class structures, and code documentation, please refer to the [**Technical Specification**](./technical_specification.md).
 
 ---
 
-### 1. The Task: A Hierarchical Approach to Semantic Segmentation
+## 1. Introduction & Scientific Context
+
+### 1.1. The Coral Reef Crisis and the Need for Automated Analysis
+
+Coral reefs represent one of Earth's most biodiverse ecosystems, supporting approximately 25% of marine species while occupying less than 1% of ocean area. However, these critical ecosystems face unprecedented threats from climate change, ocean acidification, pollution, and human activities. The 2016-2017 global bleaching event alone killed approximately 50% of corals on the Great Barrier Reef, highlighting the urgent need for comprehensive monitoring systems.
+
+Traditional reef monitoring relies on manual surveys conducted by trained marine biologists—a process that is time-consuming, expensive, and inherently limited in spatial and temporal coverage. The advent of underwater imaging systems and autonomous underwater vehicles (AUVs) has enabled the collection of vast amounts of high-resolution imagery, but the bottleneck has shifted from data collection to data analysis.
+
+Our project addresses this fundamental challenge by developing an automated computer vision system capable of extracting comprehensive ecological information from underwater imagery at scale. The system must not only identify what organisms are present but also assess their health status and spatial relationships—information critical for understanding reef dynamics and guiding conservation efforts.
+
+### 1.2. Computer Vision Challenges in Marine Environments
+
+Underwater imagery presents unique challenges that distinguish it from terrestrial computer vision applications:
+
+- **Complex Lighting Conditions**: Water absorption and scattering create non-uniform illumination, color shifts, and reduced contrast
+- **Dynamic Environments**: Water movement, marine life, and suspended particles create temporal variations
+- **High Intra-class Variability**: Coral species exhibit significant morphological variation based on growth conditions
+- **Severe Class Imbalance**: Rare species and health states are underrepresented in natural datasets
+- **Hierarchical Relationships**: Ecological categories exist in natural hierarchies that flat classification ignores
+- **Contextual Dependencies**: Species identification often requires understanding of surrounding ecological context
+
+These challenges necessitate specialized approaches that go beyond standard computer vision techniques developed for terrestrial applications.
+
+---
+
+## 2. Theoretical Foundations: From Multi-Task Learning to Hierarchical Representation
+
+### 2.1. Multi-Task Learning Theory
+
+Multi-Task Learning (MTL) is grounded in the principle that learning multiple related tasks simultaneously can improve performance on individual tasks compared to learning them in isolation. This improvement stems from several theoretical mechanisms:
+
+#### Inductive Transfer and Shared Representations
+When tasks share underlying structure, learning one task can provide inductive bias that improves learning on related tasks. In our domain, genus identification and health assessment both require understanding coral morphology, creating natural opportunities for positive transfer. The shared encoder learns features that are useful across tasks, leading to more robust and generalizable representations.
+
+#### Regularization Through Task Diversity
+Training on multiple tasks acts as implicit regularization, preventing overfitting to any single task. This is particularly valuable in domains with limited labeled data, where single-task models might memorize training examples rather than learning generalizable features.
+
+#### Attention and Cognitive Load Theory
+From a cognitive science perspective, humans excel at coral identification by simultaneously considering multiple attributes (shape, color, texture, context). Our MTL approach mimics this cognitive process, forcing the model to develop holistic representations rather than relying on spurious correlations.
+
+### 2.2. Hierarchical Task Decomposition
+
+Traditional flat classification treats all classes as equally difficult and independent. However, ecological taxonomy follows natural hierarchies, and different levels of this hierarchy have different biological and practical significance.
+
+#### Primary vs. Auxiliary Task Hierarchy
+We introduce a novel three-tier hierarchy:
+
+1. **Primary Tasks** (Genus, Health): Core ecological outputs requiring high precision
+2. **Auxiliary Tasks** (Fish, Substrate, Human-artifacts): Contextual information and noise modeling
+3. **Meta-Tasks** (Global metrics, Boundary detection): Emergent properties of the system
+
+This hierarchy reflects both ecological importance and task difficulty, allowing us to allocate computational resources appropriately.
+
+#### Theoretical Justification for Task Selection
+
+**Genus Classification** serves as the primary morphological understanding task. Coral genera represent fundamental structural archetypes that have evolved over millions of years. Learning to distinguish between genera requires the model to develop sophisticated spatial reasoning capabilities and morphological feature extraction—skills that transfer to many other marine recognition tasks.
+
+**Health Assessment** represents the primary physiological understanding task. The ability to distinguish healthy, bleached, and dead coral requires understanding subtle color and texture patterns while maintaining awareness of underlying morphological structure (since dead corals retain their skeletal form).
+
+**Auxiliary Tasks** are theoretically motivated by signal-to-noise optimization. In information theory terms, these tasks help the model explicitly model and factor out sources of noise and confounding variables:
+- Fish represent dynamic occlusion noise
+- Human artifacts represent survey equipment and contamination
+- Substrate provides ecological context and spatial priors
+
+### 2.3. Attention Mechanisms and Information Theory
+
+Our cross-attention mechanism is grounded in information theory and cognitive attention models. The core insight is that different tasks require different types of information at different spatial locations.
+
+#### Selective Information Flow
+Traditional MTL approaches often use simple parameter sharing or task-specific heads without explicit information routing. Our cross-attention mechanism allows tasks to selectively attend to relevant information from other task streams, implementing a form of learned routing based on mutual information maximization.
+
+#### Contextual Disambiguation
+Attention mechanisms help resolve ambiguous cases by leveraging context. For example, distinguishing between dead coral and rock formations requires understanding the surrounding ecological context—information that may be better captured by the substrate segmentation stream.
+
+---
+
+## 3. Architectural Innovations: Beyond Standard Multi-Task Learning
+
+### 3.1. Asymmetric Decoder Architecture
+
+Standard MTL implementations often use symmetric architectures where all tasks receive equal computational resources. Our asymmetric design is theoretically motivated by task complexity analysis:
+
+#### Computational Complexity Matching
+Primary tasks (genus, health) require complex spatial reasoning and fine-grained feature extraction, justifying full MLP decoders. Auxiliary tasks primarily serve as regularizers and context providers, making lightweight heads sufficient. This asymmetry optimally allocates computational budget based on task requirements.
+
+#### Avoiding Negative Transfer
+Asymmetric architectures help prevent negative transfer—when learning one task hurts performance on another. By giving primary tasks dedicated high-capacity decoders while constraining auxiliary tasks to lightweight heads, we minimize the risk of auxiliary tasks overwhelming primary task learning.
+
+### 3.2. Cross-Attention as Learned Information Routing
+
+Our cross-attention mechanism implements a sophisticated information routing system based on query-key-value attention:
+
+#### Dynamic Context Selection
+Rather than fixed feature sharing, cross-attention allows dynamic, content-dependent information flow. The genus classifier can query health, substrate, and fish information selectively based on what's most relevant for each spatial location.
+
+#### Multimodal Fusion
+Cross-attention provides a principled way to fuse information across different semantic modalities (morphological, physiological, contextual) within a unified framework.
+
+#### Gated Integration
+The gating mechanism in our decoder allows the model to learn when to rely on original task-specific features versus cross-task information, providing adaptive fusion based on local uncertainty and confidence.
+
+### 3.3. Hierarchical Uncertainty Weighting
+
+Our loss function incorporates learnable uncertainty parameters based on homoscedastic uncertainty modeling:
+
+#### Uncertainty-Aware Learning
+Following Kendall & Gal (2017), we model task-specific uncertainty through learnable log-variance parameters. Tasks with higher uncertainty receive lower weights, preventing noisy or difficult tasks from dominating the learning process.
+
+#### Adaptive Task Balancing
+Unlike fixed weighting schemes, learnable uncertainty allows the model to automatically adapt task weights during training based on relative task difficulty and data quality.
+
+---
+
+## 4. Data-Centric AI Principles
+
+### 4.1. Context-Aware Spatial Sampling Strategy
+
+Our Poisson Disk Sampling (PDS) approach is motivated by information-theoretic principles and ecological survey methodology:
+
+#### Information Density Optimization
+Random sampling from reef imagery would result in patches dominated by low-information regions (sand, water). PDS ensures every training sample contains meaningful ecological content, maximizing information density per training example.
+
+#### Spatial Coverage Guarantees
+PDS provides mathematical guarantees about spatial coverage, ensuring the model sees diverse spatial contexts while avoiding excessive clustering around high-density regions.
+
+#### Class Balance Through Adaptive Sampling
+Our adaptive minimum distance parameter helps address class imbalance by allowing denser sampling in regions with rare classes, improving representation of minority ecological categories.
+
+### 4.2. Augmentation Strategy: Domain-Specific Invariances
+
+Our augmentation pipeline is designed based on understanding of underwater imaging physics and ecological survey methodology:
+
+#### Geometric Invariances
+Coral morphology should be recognizable regardless of camera orientation, justifying rotation, flipping, and scale augmentations. These augmentations also help the model generalize across different survey altitudes and angles.
+
+#### Photometric Separability
+Color and lighting variations are common in underwater environments due to depth, water clarity, and lighting conditions. By applying photometric augmentations only to images (not masks), we teach the model that semantic content is invariant to lighting while maintaining the integrity of ground truth labels.
+
+#### Physics-Informed Augmentation
+Our augmentation parameters are informed by underwater imaging physics—for example, the range of color shifts reflects actual spectral absorption characteristics of seawater.
+
+---
+
+## 5. Loss Function Design: Theoretical Motivations
+
+### 5.1. Hybrid Loss Components
+
+Our loss function combines multiple loss types to address different theoretical aspects of the learning problem:
+
+#### Focal Loss for Class Imbalance
+Focal loss addresses the extreme class imbalance problem by down-weighting well-classified examples and focusing learning on hard negatives. This is particularly important for rare coral genera that might otherwise be ignored by the optimization process.
+
+#### Dice Loss for Spatial Coherence
+Dice loss directly optimizes for spatial overlap (IoU), encouraging spatially coherent predictions. This is theoretically motivated by the observation that coral organisms form connected regions rather than scattered pixels.
+
+#### Consistency Regularization
+Our consistency loss penalizes logically inconsistent predictions (e.g., healthy coral in background regions), implementing domain knowledge as soft constraints on the model's output space.
+
+### 5.2. Hierarchical Loss Weighting
+
+The hierarchical structure of our loss function reflects the relative importance and difficulty of different tasks:
+
+#### Primary Task Emphasis
+Primary tasks receive higher weights and more sophisticated loss functions, reflecting their importance for downstream ecological analysis.
+
+#### Auxiliary Task Regularization
+Auxiliary tasks use simpler loss functions and lower weights, consistent with their role as regularizers rather than primary outputs.
+
+#### Learnable Balancing
+Uncertainty-based weighting allows the model to automatically adjust the relative importance of tasks based on learned estimates of task difficulty and noise levels.
+
+---
+
+## 6. Evaluation Framework: Beyond Standard Metrics
+
+### 6.1. Hierarchical Evaluation Methodology
+
+Our evaluation framework recognizes that different stakeholders have different needs and that standard computer vision metrics may not capture ecological relevance:
+
+#### Grouped vs. Ungrouped Evaluation
+We evaluate tasks at multiple hierarchical levels, recognizing that some applications may only need coarse-grained distinctions while others require fine-grained classification.
+
+#### Boundary-Aware Metrics
+Boundary IoU specifically measures the quality of object boundaries, which is critical for ecological applications where precise spatial extent affects biomass and coverage estimates.
+
+#### Task-Specific Metrics
+Different tasks are evaluated with metrics appropriate to their ecological function—for example, health assessment might emphasize sensitivity to bleaching events even at the cost of some false positives.
+
+### 6.2. Diagnostic Error Analysis
+
+Our TIDE-inspired error decomposition provides actionable insights for model improvement:
+
+#### Error Attribution
+By decomposing errors into classification, localization, and false positive/negative components, we can identify specific failure modes and target improvements accordingly.
+
+#### Ecological Interpretability
+Error categories are designed to be interpretable by marine biologists, facilitating collaboration between computer vision researchers and domain experts.
+
+---
+
+## 7. Scalability and Deployment Considerations
+
+### 7.1. Computational Efficiency Design
+
+Our architecture is designed with deployment constraints in mind:
+
+#### Asymmetric Resource Allocation
+The asymmetric decoder design reduces computational requirements while maintaining performance on primary tasks, enabling deployment on resource-constrained platforms.
+
+#### Sliding Window Inference
+Our inference strategy allows processing of arbitrarily large images while maintaining memory efficiency, crucial for analyzing high-resolution survey imagery.
+
+### 7.2. Model Uncertainty and Reliability
+
+For scientific applications, understanding model uncertainty is crucial:
+
+#### Epistemic vs. Aleatoric Uncertainty
+Our framework can be extended to provide uncertainty estimates, helping researchers understand when model predictions should be trusted versus requiring human review.
+
+#### Calibrated Confidence
+Proper uncertainty calibration ensures that model confidence scores accurately reflect prediction reliability, enabling informed decision-making in ecological applications.
+
+---
+
+## 8. Contributions to Computer Vision and Marine Science
+
+### 8.1. Computer Vision Contributions
+
+#### Novel MTL Architecture
+Our asymmetric decoder with cross-attention represents a novel approach to task-specific resource allocation in multi-task learning.
+
+#### Domain-Specific Innovations
+Our adaptations for underwater imagery (physics-informed augmentation, context-aware sampling) provide templates for other challenging imaging domains.
+
+#### Hierarchical Learning Framework
+Our approach to hierarchical task decomposition offers insights for other domains with natural category hierarchies.
+
+### 8.2. Marine Science Contributions
+
+#### Automated Reef Assessment
+Our system enables large-scale, consistent reef assessment that would be impossible with manual methods alone.
+
+#### Standardized Ecological Metrics
+By providing consistent, automated analysis, our system enables standardized comparisons across different reef locations and time periods.
+
+#### Conservation Tool Development
+The system serves as a foundation for conservation tools, early warning systems, and adaptive management strategies.
+
+---
+
+## 9. Future Directions and Theoretical Extensions
+
+### 9.1. Temporal Dynamics and Ecological Modeling
+
+#### Video Analysis and Change Detection
+Extending our framework to temporal data would enable analysis of reef dynamics, growth rates, and recovery processes.
+
+#### Integration with Ecological Models
+Our outputs could be integrated with ecological models to predict future reef states and evaluate conservation interventions.
+
+### 9.2. Multi-Modal and Multi-Scale Integration
+
+#### Fusion with Environmental Data
+Combining imagery with environmental data (temperature, pH, nutrients) could improve health assessment and enable predictive modeling.
+
+#### Multi-Resolution Analysis
+Integrating analysis across spatial scales (colony, community, ecosystem) could provide more comprehensive ecological understanding.
+
+### 9.3. Active Learning and Human-AI Collaboration
+
+#### Uncertainty-Guided Sampling
+Using model uncertainty to guide collection of new training data could improve efficiency of labeling efforts.
+
+#### Expert-in-the-Loop Systems
+Designing interfaces for marine biologists to interact with and correct model predictions could accelerate both model improvement and scientific discovery.
+
+### 9.4. Theoretical Advances in Marine Computer Vision
+
+#### Physics-Informed Neural Networks
+Incorporating underwater optics and marine biology principles directly into network architectures could improve performance and interpretability.
+
+#### Causal Representation Learning
+Learning causal relationships between environmental factors and coral health could enable more robust and generalizable models.
+
+#### Few-Shot Learning for Rare Species
+Developing specialized techniques for rare coral species and disease states could improve coverage of understudied phenomena.
+
+---
+
+## 10. Ethical Considerations and Societal Impact
+
+### 10.1. Responsible AI in Marine Science
+
+#### Bias and Representation
+Ensuring our models work across different geographic regions, lighting conditions, and survey methodologies is crucial for equitable scientific applications.
+
+#### Transparency and Interpretability
+Providing interpretable outputs and uncertainty estimates helps marine biologists understand and validate model decisions.
+
+### 10.2. Broader Impact on Conservation
+
+#### Democratic Access to Reef Assessment
+Automated analysis tools can democratize reef assessment capabilities, enabling smaller organizations and developing nations to participate in global monitoring efforts.
+
+#### Evidence-Based Policy Making
+Consistent, large-scale data from automated systems can provide the evidence base needed for informed marine protection policies.
+
+#### Climate Change Documentation
+Our system contributes to the scientific documentation of climate change impacts on marine ecosystems, supporting global climate action efforts.
+
+---
+
+This comprehensive theoretical specification establishes the scientific foundations for the Coral-MTL project, positioning our contributions within the broader context of computer vision research and marine conservation science. The framework developed here serves not only as justification for our design decisions but also as a foundation for future advances in automated marine ecosystem analysis.
+
+For detailed technical implementation of these theoretical concepts, please see the [**Technical Specification**](./technical_specification.md).
 
 The overarching goal of this project is the automated, pixel-level understanding of underwater coral reef imagery for ecological monitoring. Traditional semantic segmentation in this domain often treats all classes as a single, flat list, which fails to capture the inherent relationships and varying levels of importance among them. Our approach re-frames the problem as a **hierarchical multi-task learning (MTL) challenge**. This paradigm is built on the understanding that not all information is of equal value and that the model can benefit from explicitly learning a structured, hierarchical representation of the scene.
 

@@ -13,6 +13,7 @@ import yaml
 from typing import Dict, Any, Optional, Tuple, List
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from pathlib import Path
 
 # Import the model classes defined in the project structure
 from .model.core import CoralMTLModel, BaselineSegformer
@@ -43,6 +44,9 @@ class ExperimentFactory:
             config_path (str, optional): The path to the main YAML configuration file.
             config_dict (Dict, optional): A dictionary containing the configuration.
         """
+        # set root path for relative paths in config files
+        self.root_path = Path(".." / "..").resolve()
+
         if config_dict:
             self.config = config_dict
         elif config_path:
@@ -68,10 +72,11 @@ class ExperimentFactory:
         """Instantiates the correct TaskSplitter based on the config."""
         if self.task_splitter: return
 
-        task_def_path = self.config.get('data', {}).get('task_definitions_path')
-        if not task_def_path:
+        task_def_rel_path = self.config.get('data', {}).get('task_definitions_path')
+        if not task_def_rel_path:
             raise ValueError("'task_definitions_path' is required in the data config.")
 
+        task_def_path = self.root_path / task_def_rel_path
         with open(task_def_path, 'r') as f:
             task_definitions = yaml.safe_load(f)
         
