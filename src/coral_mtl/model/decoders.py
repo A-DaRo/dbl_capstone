@@ -187,7 +187,10 @@ class HierarchicalContextAwareDecoder(nn.Module):
     def _perform_cross_attention(self, query_task: str, decoded_features: Dict[str, torch.Tensor]) -> torch.Tensor:
         """Performs attention where a query task attends to context from all other tasks."""
         b, _, h, w = decoded_features[query_task].shape
-        q = self.to_qkv[query_task][0](decoded_features[query_task]).flatten(2).transpose(1, 2)
+        
+        # Apply context pooling to query as well to match spatial dimensions
+        query_feature = self.context_pool(decoded_features[query_task])
+        q = self.to_qkv[query_task][0](query_feature).flatten(2).transpose(1, 2)
 
         context_keys, context_values = [], []
         # Only iterate over tasks that have decoders and exist in decoded_features
@@ -199,11 +202,19 @@ class HierarchicalContextAwareDecoder(nn.Module):
                 context_keys.append(k_task)
                 context_values.append(v_task)
         
+        if not context_keys:  # Handle case where no context tasks are available
+            # Return a zero tensor with the expected shape after pooling
+            pooled_h, pooled_w = h // 4, w // 4
+            attention_dim = q.shape[-1]
+            return torch.zeros(b, attention_dim, pooled_h, pooled_w, device=q.device)
+        
         k_context = torch.cat(context_keys, dim=1)
         v_context = torch.cat(context_values, dim=1)
         
         out = F.scaled_dot_product_attention(q, k_context, v_context)
-        return out.transpose(1, 2).reshape(b, -1, h, w)
+        # Reshape back to spatial dimensions (but with pooled size)
+        pooled_h, pooled_w = h // 4, w // 4
+        return out.transpose(1, 2).reshape(b, -1, pooled_h, pooled_w)
 
     def forward(self, features: List[torch.Tensor]) -> Dict[str, torch.Tensor]:
         """Forward pass of the decoder."""
@@ -223,7 +234,15 @@ class HierarchicalContextAwareDecoder(nn.Module):
                 if task in enriched_features and task in self.attn_proj and task in self.gating_layers:
                     # Use attention for primary tasks
                     f_original = decoded_features[task]
-                    f_projected_enrichment = self.attn_proj[task](enriched_features[task])
+                    f_enriched = enriched_features[task]
+                    
+                    # Upsample the enriched features to match original spatial dimensions
+                    original_h, original_w = f_original.shape[2], f_original.shape[3]
+                    if f_enriched.shape[2] != original_h or f_enriched.shape[3] != original_w:
+                        f_enriched = F.interpolate(f_enriched, size=(original_h, original_w), 
+                                                   mode='bilinear', align_corners=False)
+                    
+                    f_projected_enrichment = self.attn_proj[task](f_enriched)
                     gate = self.gating_layers[task](f_original)
                     final_feature = (gate * f_original) + ((1 - gate) * f_projected_enrichment)
                     logits[task] = self.predictors[task](final_feature)

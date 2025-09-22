@@ -132,9 +132,18 @@ class Trainer:
                     for task_name, task_logits in batch_predictions.items()
                 }
 
+                # Handle different model types for metrics calculator
+                # MTL models expect dictionary, baseline models expect single tensor
+                if len(stitched_predictions_logits) == 1 and 'segmentation' in stitched_predictions_logits:
+                    # This is a baseline model - extract the single tensor for CoralMetrics
+                    predictions_for_metrics = stitched_predictions_logits['segmentation']
+                else:
+                    # This is an MTL model - pass the full dictionary for CoralMTLMetrics
+                    predictions_for_metrics = stitched_predictions_logits
+
                 # Update metrics with the required data payload
                 self.metrics_calculator.update(
-                    predictions=stitched_predictions_logits,
+                    predictions=predictions_for_metrics,
                     original_targets=original_masks,
                     image_ids=image_ids
                 )

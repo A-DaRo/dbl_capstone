@@ -56,14 +56,37 @@ class CoralLoss(nn.Module):
         )
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        # Check for NaN inputs
+        if torch.any(torch.isnan(logits)):
+            print("Warning: NaN detected in CombinedLoss logits")
+            return torch.tensor(1.0, device=logits.device, requires_grad=True)
+        
+        if torch.any(torch.isnan(targets)):
+            print("Warning: NaN detected in CombinedLoss targets")
+            return torch.tensor(1.0, device=logits.device, requires_grad=True)
+            
         loss_primary = self.primary_loss(logits, targets.long())
         loss_dice = self.dice_loss(logits, targets.long())
+        
+        # Check for NaN in loss components
+        if torch.isnan(loss_primary):
+            print("Warning: NaN detected in primary loss component")
+            loss_primary = torch.tensor(0.5, device=logits.device, requires_grad=True)
+            
+        if torch.isnan(loss_dice):
+            print("Warning: NaN detected in dice loss component")
+            loss_dice = torch.tensor(0.5, device=logits.device, requires_grad=True)
         
         # Only add dice loss if its weight is > 0 to avoid unnecessary computation
         if self.hybrid_alpha < 1.0:
             total_loss = self.hybrid_alpha * loss_primary + (1 - self.hybrid_alpha) * loss_dice
         else:
             total_loss = loss_primary
+            
+        # Final NaN check
+        if torch.isnan(total_loss):
+            print("Warning: NaN detected in CombinedLoss total loss")
+            total_loss = torch.tensor(1.0, device=logits.device, requires_grad=True)
             
         return total_loss
 
@@ -117,8 +140,18 @@ class CoralMTLLoss(nn.Module):
 
     def _consistency_loss(self, genus_logits, health_logits):
         """Penalizes illogical predictions: P(healthy) > 0.5 AND P(genus=background) > 0.5"""
+        # Add numerical stability checks
+        if torch.any(torch.isnan(genus_logits)) or torch.any(torch.isnan(health_logits)):
+            print("Warning: NaN detected in consistency loss inputs")
+            return torch.tensor(0.0, device=genus_logits.device)
+            
         genus_probs = F.softmax(genus_logits, dim=1)
         health_probs = F.softmax(health_logits, dim=1)
+        
+        # Check for NaN in probabilities
+        if torch.any(torch.isnan(genus_probs)) or torch.any(torch.isnan(health_probs)):
+            print("Warning: NaN detected in softmax probabilities")
+            return torch.tensor(0.0, device=genus_logits.device)
         
         # Assuming class index 0 is background/ignored for genus task
         idx_genus_background = 0
@@ -134,6 +167,12 @@ class CoralMTLLoss(nn.Module):
             return torch.tensor(0.0, device=genus_logits.device)
             
         penalty = p_genus_background[illogical_mask].mean()
+        
+        # Final safety check for NaN
+        if torch.isnan(penalty):
+            print("Warning: NaN detected in consistency penalty")
+            penalty = torch.tensor(0.0, device=genus_logits.device)
+            
         return penalty
 
     def forward(self,
@@ -144,26 +183,52 @@ class CoralMTLLoss(nn.Module):
         loss_genus = self.primary_loss_fn(predictions['genus'], targets['genus'])
         loss_health = self.primary_loss_fn(predictions['health'], targets['health'])
         
-        loss_aux_dict = {
-            task: self.aux_losses[task](predictions[task], targets[task].long())
-            for task in self.aux_tasks
-        }
-        loss_auxiliary_sum = sum(loss_aux_dict.values())
+        loss_aux_dict = {}
+        for task in self.aux_tasks:
+            if task in predictions and task in targets:
+                loss_aux_dict[task] = self.aux_losses[task](predictions[task], targets[task].long())
+            
+        loss_auxiliary_sum = sum(loss_aux_dict.values()) if loss_aux_dict else torch.tensor(0.0, device=loss_genus.device)
         
-        # --- 2. Hierarchical Uncertainty Weighting ---
-        precision_genus = torch.exp(-self.log_var_genus)
-        precision_health = torch.exp(-self.log_var_health)
-        loss_primary_balanced = (precision_genus * loss_genus + 0.5 * self.log_var_genus) + \
-                                (precision_health * loss_health + 0.5 * self.log_var_health)
+        # Check for NaN values in individual losses
+        if torch.isnan(loss_genus) or torch.isnan(loss_health):
+            print(f"Warning: NaN detected in primary losses - genus: {loss_genus}, health: {loss_health}")
+        if torch.isnan(loss_auxiliary_sum):
+            print(f"Warning: NaN detected in auxiliary loss sum: {loss_auxiliary_sum}")
+        
+        # --- 2. Hierarchical Uncertainty Weighting with numerical stability ---
+        # Clamp log_var values to prevent extreme precision values
+        log_var_genus_clamped = torch.clamp(self.log_var_genus, -10, 10)
+        log_var_health_clamped = torch.clamp(self.log_var_health, -10, 10)
+        log_var_aux_clamped = torch.clamp(self.log_var_aux_group, -10, 10)
+        
+        precision_genus = torch.exp(-log_var_genus_clamped)
+        precision_health = torch.exp(-log_var_health_clamped)
+        loss_primary_balanced = (precision_genus * loss_genus + 0.5 * log_var_genus_clamped) + \
+                                (precision_health * loss_health + 0.5 * log_var_health_clamped)
                                 
-        precision_aux_group = torch.exp(-self.log_var_aux_group)
-        loss_auxiliary_balanced = precision_aux_group * loss_auxiliary_sum + 0.5 * self.log_var_aux_group
+        precision_aux_group = torch.exp(-log_var_aux_clamped)
+        loss_auxiliary_balanced = precision_aux_group * loss_auxiliary_sum + 0.5 * log_var_aux_clamped
         
         # --- 3. Optional Consistency Regularizer ---
         loss_consistency = self._consistency_loss(predictions['genus'], predictions['health'])
         
+        # Check for NaN in consistency loss
+        if torch.isnan(loss_consistency):
+            print(f"Warning: NaN detected in consistency loss: {loss_consistency}")
+            loss_consistency = torch.tensor(0.0, device=loss_genus.device)
+        
         # --- 4. Calculate Final Total Loss ---
         total_loss = loss_primary_balanced + loss_auxiliary_balanced + self.w_consistency * loss_consistency
+        
+        # Final NaN check
+        if torch.isnan(total_loss):
+            print(f"Warning: NaN detected in total loss. Components:")
+            print(f"  Primary balanced: {loss_primary_balanced}")
+            print(f"  Auxiliary balanced: {loss_auxiliary_balanced}")
+            print(f"  Consistency: {loss_consistency}")
+            print(f"  Setting total loss to 1.0 to prevent training collapse")
+            total_loss = torch.tensor(1.0, device=loss_genus.device, requires_grad=True)
 
         # --- Return a dictionary of all components for logging ---
         loss_dict = {

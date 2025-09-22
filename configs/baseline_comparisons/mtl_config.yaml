@@ -32,22 +32,22 @@ data:
   # The factory will first check if this is a valid local path. If not, it assumes
   # it's a Hugging Face Hub dataset ID.
   dataset_name: "./dataset/coralscapes/"
-
+  
   # Path to the pre-processed PDS-sampled training patches.
   # This is prioritized for the 'train' split, as specified in dataset.py.
   pds_train_path: "./dataset/processed/pds_patches/"
   
   # Path to the raw, full-image dataset. Used for 'val' and 'test' splits,
   # and as a fallback for 'train' if pds_train_path is not found.
-  data_root_path: "./dataset/coralscapes/"
+  data_root_path: "./dataset/"
 
   # The single source of truth for all class and task information.
   # Required for MTL models and for non-MTL models being evaluated on MTL tasks.
   task_definitions_path: "configs/task_definitions.yaml"
   
   # Parameters for the final DataLoader object.
-  batch_size: 8
-  num_workers: 4
+  batch_size: 2
+  num_workers: 16
   
   # A fundamental parameter shared by datasets and augmentations.
   patch_size: 512

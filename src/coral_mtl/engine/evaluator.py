@@ -89,13 +89,36 @@ class Evaluator:
                     original_masks = batch['original_mask'].to(self.device)
                     image_ids = batch['image_id']
 
-                    # Perform sliding window inference on the entire batch of images
-                    # (Assuming the inferrer can handle a batch of full-size images)
-                    stitched_predictions_logits = inferrer.predict_batch(batch_images)
+                    # Perform sliding window inference on each image in the batch
+                    # Note: We need to loop through each image since predict takes single images
+                    batch_predictions = {}
+                    for idx, single_image in enumerate(batch_images):
+                        single_predictions = inferrer.predict(single_image)
+                        if idx == 0:
+                            # Initialize batch_predictions with the right structure
+                            for task_name in single_predictions:
+                                batch_predictions[task_name] = []
+                        for task_name, logits in single_predictions.items():
+                            batch_predictions[task_name].append(logits)
+                    
+                    # Stack predictions for batch processing
+                    stitched_predictions_logits = {
+                        task_name: torch.stack(task_logits, dim=0)
+                        for task_name, task_logits in batch_predictions.items()
+                    }
+
+                    # Handle different model types for metrics calculator
+                    # MTL models expect dictionary, baseline models expect single tensor
+                    if len(stitched_predictions_logits) == 1 and 'segmentation' in stitched_predictions_logits:
+                        # This is a baseline model - extract the single tensor for CoralMetrics
+                        predictions_for_metrics = stitched_predictions_logits['segmentation']
+                    else:
+                        # This is an MTL model - pass the full dictionary for CoralMTLMetrics
+                        predictions_for_metrics = stitched_predictions_logits
 
                     # Update metrics calculator with the required data
                     self.metrics_calculator.update(
-                        predictions=stitched_predictions_logits,
+                        predictions=predictions_for_metrics,
                         original_targets=original_masks,
                         image_ids=image_ids
                     )
