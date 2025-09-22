@@ -65,18 +65,79 @@ class ExperimentFactory:
         self.metrics_calculator = None
         self.metrics_storer = None
 
+        # --- Resolve all relative paths in config to absolute paths ---
+        self._resolve_config_paths()
+
         # --- Centralized Task Definition Parsing ---
         self._initialize_task_splitter()
+
+    def _resolve_config_paths(self):
+        """Resolve all relative paths in the configuration to absolute paths based on root_path."""
+        print(f"--- Resolving relative paths from root: {self.root_path} ---")
+        
+        # Resolve data paths
+        data_config = self.config.get('data', {})
+        
+        # Resolve dataset paths
+        if 'dataset_name' in data_config:
+            dataset_name = data_config['dataset_name']
+            if isinstance(dataset_name, str) and (dataset_name.startswith('./') or dataset_name.startswith('../')):
+                data_config['dataset_name'] = str(self.root_path / dataset_name)
+                print(f"Resolved dataset_name: {dataset_name} -> {data_config['dataset_name']}")
+        
+        if 'data_root_path' in data_config:
+            data_root_path = data_config['data_root_path']
+            if isinstance(data_root_path, str) and (data_root_path.startswith('./') or data_root_path.startswith('../')):
+                data_config['data_root_path'] = str(self.root_path / data_root_path)
+                print(f"Resolved data_root_path: {data_root_path} -> {data_config['data_root_path']}")
+        
+        if 'pds_train_path' in data_config:
+            pds_train_path = data_config['pds_train_path']
+            if isinstance(pds_train_path, str) and (pds_train_path.startswith('./') or pds_train_path.startswith('../')):
+                data_config['pds_train_path'] = str(self.root_path / pds_train_path)
+                print(f"Resolved pds_train_path: {pds_train_path} -> {data_config['pds_train_path']}")
+        
+        if 'task_definitions_path' in data_config:
+            task_def_path = data_config['task_definitions_path']
+            if isinstance(task_def_path, str) and not os.path.isabs(task_def_path):
+                data_config['task_definitions_path'] = str(self.root_path / task_def_path)
+                print(f"Resolved task_definitions_path: {task_def_path} -> {data_config['task_definitions_path']}")
+        
+        # Resolve trainer output directory
+        trainer_config = self.config.get('trainer', {})
+        if 'output_dir' in trainer_config:
+            output_dir = trainer_config['output_dir']
+            if isinstance(output_dir, str) and not os.path.isabs(output_dir):
+                trainer_config['output_dir'] = str(self.root_path / output_dir)
+                print(f"Resolved output_dir: {output_dir} -> {trainer_config['output_dir']}")
+        
+        # Resolve evaluator paths
+        evaluator_config = self.config.get('evaluator', {})
+        if 'checkpoint_path' in evaluator_config and evaluator_config['checkpoint_path']:
+            checkpoint_path = evaluator_config['checkpoint_path']
+            if isinstance(checkpoint_path, str) and not os.path.isabs(checkpoint_path):
+                evaluator_config['checkpoint_path'] = str(self.root_path / checkpoint_path)
+                print(f"Resolved checkpoint_path: {checkpoint_path} -> {evaluator_config['checkpoint_path']}")
+        
+        if 'output_dir' in evaluator_config and evaluator_config['output_dir']:
+            eval_output_dir = evaluator_config['output_dir']
+            if isinstance(eval_output_dir, str) and not os.path.isabs(eval_output_dir):
+                evaluator_config['output_dir'] = str(self.root_path / eval_output_dir)
+                print(f"Resolved evaluator output_dir: {eval_output_dir} -> {evaluator_config['output_dir']}")
 
     def _initialize_task_splitter(self):
         """Instantiates the correct TaskSplitter based on the config."""
         if self.task_splitter: return
 
-        task_def_rel_path = self.config.get('data', {}).get('task_definitions_path')
-        if not task_def_rel_path:
+        task_def_path = self.config.get('data', {}).get('task_definitions_path')
+        if not task_def_path:
             raise ValueError("'task_definitions_path' is required in the data config.")
 
-        task_def_path = self.root_path / task_def_rel_path
+        # Path should already be resolved to absolute by _resolve_config_paths
+        task_def_path = Path(task_def_path)
+        if not task_def_path.exists():
+            raise FileNotFoundError(f"Task definitions file not found: {task_def_path}")
+            
         with open(task_def_path, 'r') as f:
             task_definitions = yaml.safe_load(f)
         
@@ -347,6 +408,11 @@ class ExperimentFactory:
         
         print("--- Building metrics storer ---")
         output_dir = self.config.get('trainer', {}).get('output_dir', 'experiments/default_run')
+        
+        # Ensure output directory is absolute
+        if not os.path.isabs(output_dir):
+            output_dir = str(self.root_path / output_dir)
+            
         self.metrics_storer = MetricsStorer(output_dir)
         return self.metrics_storer
 
@@ -454,8 +520,16 @@ class ExperimentFactory:
             if not exp_dir: raise ValueError("Cannot auto-detect checkpoint. 'trainer.output_dir' is not set.")
             final_checkpoint_path = os.path.join(exp_dir, "best_model.pth")
         
+        # Ensure checkpoint path is absolute
+        if not os.path.isabs(final_checkpoint_path):
+            final_checkpoint_path = str(self.root_path / final_checkpoint_path)
+        
         # Determine output directory
         eval_output_dir = eval_config_dict.get('output_dir') or os.path.join(trainer_config.get('output_dir', '.'), 'evaluation')
+        
+        # Ensure evaluation output directory is absolute
+        if not os.path.isabs(eval_output_dir):
+            eval_output_dir = str(self.root_path / eval_output_dir)
 
         eval_config = SimpleNamespace(
             device=trainer_config.get('device', 'auto'),
@@ -498,7 +572,12 @@ class ExperimentFactory:
         if not study_config:
             raise ValueError("The 'study' section is missing from the configuration file.")
 
-        with open(study_config['config_path'], 'r') as f:
+        # Resolve study config path
+        config_path = study_config['config_path']
+        if not os.path.isabs(config_path):
+            config_path = str(self.root_path / config_path)
+            
+        with open(config_path, 'r') as f:
             search_space = yaml.safe_load(f)
 
         # Helper function to modify the nested config dictionary
@@ -531,6 +610,9 @@ class ExperimentFactory:
             
             # 3. Create a unique output directory for the trial
             base_output_dir = trial_config['trainer']['output_dir']
+            # Ensure base output directory is absolute
+            if not os.path.isabs(base_output_dir):
+                base_output_dir = str(self.root_path / base_output_dir)
             trial_output_dir = os.path.join(base_output_dir, f"trial_{trial.number}")
             trial_config['trainer']['output_dir'] = trial_output_dir
             
