@@ -21,11 +21,11 @@ from .data.dataset import CoralscapesMTLDataset, CoralscapesDataset
 from .data.augmentations import SegmentationAugmentation
 from .engine.optimizer import create_optimizer_and_scheduler
 from .engine.losses import CoralMTLLoss, CoralLoss
-from .engine.metrics import AbstractCoralMetrics, CoralMTLMetrics, CoralMetrics
+from .metrics.metrics import AbstractCoralMetrics, CoralMTLMetrics, CoralMetrics
 from .engine.trainer import Trainer
 from .engine.evaluator import Evaluator
 from .utils.task_splitter import MTLTaskSplitter, BaseTaskSplitter
-from .utils.metrics_storer import MetricsStorer 
+from .metrics.metrics_storer import AdvancedMetricsProcessor, MetricsStorer 
 
 class ExperimentFactory:
     """
@@ -417,6 +417,43 @@ class ExperimentFactory:
             
         self.metrics_storer = MetricsStorer(output_dir)
         return self.metrics_storer
+    
+    def get_advanced_metrics_processor(self) -> AdvancedMetricsProcessor:
+        """Builds the AdvancedMetricsProcessor for Tier 2/3 metrics computation."""
+        
+        if hasattr(self, 'advanced_metrics_processor') and self.advanced_metrics_processor:
+            return self.advanced_metrics_processor
+        
+        print("--- Building advanced metrics processor ---")
+        
+        # Check if metrics processor is enabled in config
+        metrics_processor_config = self.config.get('metrics_processor', {})
+        enabled = metrics_processor_config.get('enabled', False)
+        
+        if not enabled:
+            print("Advanced metrics processor disabled in configuration")
+            self.advanced_metrics_processor = None
+            return None
+        
+        output_dir = self.config.get('trainer', {}).get('output_dir', 'experiments/default_run')
+        
+        # Ensure output directory is absolute
+        if not os.path.isabs(output_dir):
+            output_dir = str(self.root_path / output_dir)
+        
+        num_cpu_workers = metrics_processor_config.get('num_cpu_workers', 30)
+        enabled_tasks = metrics_processor_config.get('tasks', ["ASSD", "HD95", "PanopticQuality", "ARI"])
+        
+        self.advanced_metrics_processor = AdvancedMetricsProcessor(
+            output_dir=output_dir,
+            num_cpu_workers=num_cpu_workers,
+            enabled_tasks=enabled_tasks
+        )
+        
+        print(f"Advanced metrics processor configured with {num_cpu_workers} workers")
+        print(f"Enabled tasks: {enabled_tasks}")
+        
+        return self.advanced_metrics_processor
 
 
     def run_training(self, trial: Optional[optuna.Trial] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -455,6 +492,7 @@ class ExperimentFactory:
         loss_fn = self.get_loss_function()
         metrics_calculator = self.get_metrics_calculator()
         metrics_storer = self.get_metrics_storer()
+        metrics_processor = self.get_advanced_metrics_processor()  # Get Tier 2/3 processor
 
         # 2. Prepare the trainer-specific configuration object.
         # --- Prepare configuration object for the Trainer ---
@@ -485,7 +523,8 @@ class ExperimentFactory:
             optimizer=optimizer,
             scheduler=scheduler,
             config=trainer_config,
-            trial=trial
+            trial=trial,
+            metrics_processor=metrics_processor  # Add Tier 2/3 processor
         )
         
         trainer.train()
@@ -517,6 +556,7 @@ class ExperimentFactory:
         test_loader = self.get_dataloaders()['test']
         metrics_calculator = self.get_metrics_calculator()
         metrics_storer = self.get_metrics_storer()
+        metrics_processor = self.get_advanced_metrics_processor()  # Get Tier 2/3 processor
         
         # --- Prepare configuration object for the Evaluator ---
         trainer_config = self.config.get('trainer', {})
@@ -562,7 +602,8 @@ class ExperimentFactory:
             test_loader=test_loader,
             metrics_calculator=metrics_calculator,
             metrics_storer=metrics_storer,
-            config=eval_config
+            config=eval_config,
+            metrics_processor=metrics_processor  # Add Tier 2/3 processor
         )
         
         final_metrics = evaluator.evaluate()

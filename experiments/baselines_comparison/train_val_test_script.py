@@ -30,6 +30,7 @@ import sys
 import argparse
 import logging
 import torch
+import platform
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 import json
@@ -78,28 +79,68 @@ class BaselineComparison:
         self._validate_configs()
     
     def _setup_logging(self):
-        """Configure logging for the experiment."""
-        log_format = '%(asctime)s - %(levelname)s - %(message)s'
+        """Configure detailed logging for the experiment."""
+        # Create a more detailed log format
+        log_format = '%(asctime)s - %(name)s - %(levelname)s - [%(funcName)s:%(lineno)d] - %(message)s'
+        
+        # Create timestamp for log filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_filename = f'baseline_comparison_{timestamp}.log'
+        
+        # Remove any existing handlers to avoid duplicates
+        for handler in logging.root.handlers[:]:
+            logging.root.removeHandler(handler)
+        
+        # Configure logging with more detailed settings
         logging.basicConfig(
-            level=logging.INFO,
+            level=logging.DEBUG,  # Set to DEBUG for maximum verbosity
             format=log_format,
             handlers=[
                 logging.StreamHandler(sys.stdout),
-                logging.FileHandler(
-                    f'baseline_comparison_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
-                )
-            ]
+                logging.FileHandler(log_filename, mode='w', encoding='utf-8')
+            ],
+            force=True  # Force reconfiguration
         )
+        
+        # Get logger for this module
         self.logger = logging.getLogger(__name__)
+        
+        # Also configure third-party loggers to be less verbose
+        logging.getLogger('torch').setLevel(logging.WARNING)
+        logging.getLogger('torchvision').setLevel(logging.WARNING)
+        logging.getLogger('PIL').setLevel(logging.WARNING)
+        
+        # Log initial setup information
+        self.logger.info(f"Logging configured with file: {log_filename}")
+        self.logger.info(f"Log level set to: {logging.getLevelName(logging.DEBUG)}")
+        self.logger.info(f"Python version: {sys.version}")
+        self.logger.info(f"PyTorch version: {torch.__version__ if 'torch' in sys.modules else 'Not loaded'}")
+        self.logger.info(f"Current working directory: {os.getcwd()}")
+        self.logger.info(f"Script directory: {os.path.dirname(os.path.abspath(__file__))}")
+        
+        # Log system information
+        import platform
+        self.logger.info(f"Platform: {platform.platform()}")
+        self.logger.info(f"Architecture: {platform.architecture()}")
+        if torch.cuda.is_available():
+            self.logger.info(f"CUDA available: True, devices: {torch.cuda.device_count()}")
+            for i in range(torch.cuda.device_count()):
+                self.logger.info(f"  GPU {i}: {torch.cuda.get_device_name(i)}")
+        else:
+            self.logger.info("CUDA available: False")
     
     def _validate_configs(self):
         """Validate that required config files exist."""
+        self.logger.debug("Starting configuration validation")
         for name, path in self.config_paths.items():
+            self.logger.debug(f"Checking {name} config at path: {path}")
             if not os.path.exists(path):
+                self.logger.error(f"Configuration file not found: {path}")
                 raise FileNotFoundError(
                     f"Configuration file not found: {path}. "
                     f"Please ensure {name} config exists in {self.base_config_dir}"
                 )
+            self.logger.debug(f"✓ {name} config file exists")
         self.logger.info("All configuration files validated successfully")
     
     def run_single_experiment(
@@ -124,11 +165,15 @@ class BaselineComparison:
         self.logger.info(f"\n{'='*60}")
         self.logger.info(f"Starting {experiment_name.upper()} Experiment")
         self.logger.info(f"Config: {config_path}")
+        self.logger.info(f"Skip training: {skip_training}")
+        self.logger.info(f"Checkpoint path: {checkpoint_path if checkpoint_path else 'Auto-detect best'}")
         self.logger.info(f"{'='*60}")
         
         try:
             # Initialize the experiment factory
+            self.logger.debug(f"Initializing ExperimentFactory with config: {config_path}")
             factory = ExperimentFactory(config_path=config_path)
+            self.logger.debug("ExperimentFactory initialized successfully")
             
             experiment_results = {
                 'name': experiment_name,
@@ -141,17 +186,40 @@ class BaselineComparison:
                 'error': None
             }
             
+            # Log experiment configuration details
+            self.logger.debug("Logging experiment configuration details...")
+            try:
+                if hasattr(factory, 'config'):
+                    config_obj = factory.config
+                    self.logger.info(f"Model type: {getattr(config_obj, 'model_name', 'Unknown')}")
+                    self.logger.info(f"Device: {getattr(config_obj, 'device', 'Unknown')}")
+                    self.logger.info(f"Batch size: {getattr(config_obj, 'batch_size', 'Unknown')}")
+                    self.logger.info(f"Learning rate: {getattr(config_obj, 'learning_rate', 'Unknown')}")
+                    self.logger.info(f"Number of epochs: {getattr(config_obj, 'num_epochs', 'Unknown')}")
+                    self.logger.info(f"Output directory: {getattr(config_obj, 'output_dir', 'Unknown')}")
+            except Exception as e:
+                self.logger.warning(f"Could not log config details: {str(e)}")
+            
             # Phase 1: Training & Validation (if not skipped)
             if not skip_training:
                 self.logger.info(f"🎯 Phase 1: Training & Validation for {experiment_name}")
+                self.logger.debug("Starting training phase...")
                 try:
+                    start_time = datetime.now()
+                    self.logger.debug(f"Training started at: {start_time}")
+                    
                     factory.run_training()
+                    
+                    end_time = datetime.now()
+                    training_duration = end_time - start_time
+                    self.logger.info(f"Training duration: {training_duration}")
+                    
                     experiment_results['training_completed'] = True
                     self.logger.info(f"✅ Training completed successfully for {experiment_name}")
                     
                 except Exception as e:
                     error_msg = f"❌ Training failed for {experiment_name}: {str(e)}"
-                    self.logger.error(error_msg)
+                    self.logger.error(error_msg, exc_info=True)
                     experiment_results['error'] = error_msg
                     return experiment_results
             else:
@@ -159,8 +227,18 @@ class BaselineComparison:
             
             # Phase 2: Final Testing & Evaluation
             self.logger.info(f"🔍 Phase 2: Final Testing & Evaluation for {experiment_name}")
+            self.logger.debug("Starting evaluation phase...")
             try:
+                eval_start_time = datetime.now()
+                self.logger.debug(f"Evaluation started at: {eval_start_time}")
+                self.logger.debug(f"Using checkpoint: {checkpoint_path if checkpoint_path else 'Auto-detect best'}")
+                
                 test_metrics = factory.run_evaluation(checkpoint_path=checkpoint_path)
+                
+                eval_end_time = datetime.now()
+                eval_duration = eval_end_time - eval_start_time
+                self.logger.info(f"Evaluation duration: {eval_duration}")
+                
                 experiment_results['test_metrics'] = test_metrics
                 experiment_results['evaluation_completed'] = True
                 
@@ -170,11 +248,13 @@ class BaselineComparison:
                 
             except Exception as e:
                 error_msg = f"❌ Evaluation failed for {experiment_name}: {str(e)}"
-                self.logger.error(error_msg)
+                self.logger.error(error_msg, exc_info=True)
                 experiment_results['error'] = error_msg
                 return experiment_results
             
             experiment_results['end_time'] = datetime.now().isoformat()
+            total_duration = datetime.fromisoformat(experiment_results['end_time']) - datetime.fromisoformat(experiment_results['start_time'])
+            self.logger.info(f"Total experiment duration: {total_duration}")
             
             # Log completion
             self.logger.info(f"🎉 {experiment_name.upper()} experiment completed successfully!")
@@ -195,12 +275,19 @@ class BaselineComparison:
     def _log_key_metrics(self, experiment_name: str, metrics: Dict[str, Any]):
         """Log key performance metrics in a readable format."""
         self.logger.info(f"📊 Key Metrics for {experiment_name.upper()}:")
+        self.logger.debug(f"Full metrics structure for {experiment_name}: {json.dumps(metrics, indent=2, default=str)}")
         
         # Global metrics (always present)
         if 'global' in metrics:
             global_metrics = metrics['global']
             self.logger.info(f"   Global mIoU: {global_metrics.get('mIoU', 'N/A'):.4f}")
             self.logger.info(f"   Global BIoU: {global_metrics.get('BIoU', 'N/A'):.4f}")
+            self.logger.debug(f"   Global pixel accuracy: {global_metrics.get('pixel_accuracy', 'N/A')}")
+            if 'TIDE_errors' in global_metrics and global_metrics['TIDE_errors']:
+                tide = global_metrics['TIDE_errors']
+                self.logger.debug(f"   Global TIDE - Classification error: {tide.get('classification_error', 'N/A'):.4f}")
+                self.logger.debug(f"   Global TIDE - Background error: {tide.get('background_error', 'N/A'):.4f}")
+                self.logger.debug(f"   Global TIDE - Missed error: {tide.get('missed_error', 'N/A'):.4f}")
         
         # Task-specific metrics (for MTL models)
         task_metrics = [k for k in metrics.keys() if k != 'global']
@@ -211,6 +298,13 @@ class BaselineComparison:
                     miou = metrics[task].get('mIoU', 'N/A')
                     biou = metrics[task].get('BIoU', 'N/A')
                     self.logger.info(f"     {task}: mIoU={miou:.4f}, BIoU={biou:.4f}")
+                    self.logger.debug(f"     {task} detailed metrics: {json.dumps(metrics[task], indent=2, default=str)}")
+        
+        # Log optimization metrics if available
+        if 'optimization_metrics' in metrics:
+            self.logger.debug("Optimization metrics summary:")
+            for key, value in metrics['optimization_metrics'].items():
+                self.logger.debug(f"   {key}: {value}")
     
     def run_comparison(
         self, 
@@ -232,6 +326,8 @@ class BaselineComparison:
         self.logger.info("🔬 Starting Comprehensive Baseline Comparison")
         self.logger.info(f"Modes to run: {', '.join(modes)}")
         self.logger.info(f"Skip training: {skip_training}")
+        self.logger.debug(f"Config directory: {self.base_config_dir}")
+        self.logger.debug(f"Available config files: {list(self.config_paths.keys())}")
         
         comparison_results = {
             'comparison_start_time': datetime.now().isoformat(),
@@ -241,15 +337,21 @@ class BaselineComparison:
         }
         
         checkpoint_paths = checkpoint_paths or {}
+        self.logger.debug(f"Checkpoint paths provided: {checkpoint_paths}")
         
         # Run each experiment
-        for mode in modes:
+        for i, mode in enumerate(modes, 1):
+            self.logger.info(f"\n🚀 Running experiment {i}/{len(modes)}: {mode}")
+            
             if mode not in self.config_paths:
                 self.logger.warning(f"⚠️  Unknown mode '{mode}' - skipping")
                 continue
                 
             config_path = self.config_paths[mode]
             checkpoint_path = checkpoint_paths.get(mode)
+            
+            self.logger.debug(f"Config path for {mode}: {config_path}")
+            self.logger.debug(f"Checkpoint path for {mode}: {checkpoint_path}")
             
             experiment_result = self.run_single_experiment(
                 config_path=config_path,
@@ -259,8 +361,20 @@ class BaselineComparison:
             )
             
             comparison_results['experiments'][mode] = experiment_result
+            
+            # Log intermediate results
+            if experiment_result.get('error'):
+                self.logger.error(f"❌ Experiment {mode} failed: {experiment_result['error']}")
+            else:
+                self.logger.info(f"✅ Experiment {mode} completed successfully")
         
         comparison_results['comparison_end_time'] = datetime.now().isoformat()
+        
+        # Calculate total comparison duration
+        start_dt = datetime.fromisoformat(comparison_results['comparison_start_time'])
+        end_dt = datetime.fromisoformat(comparison_results['comparison_end_time'])
+        total_duration = end_dt - start_dt
+        self.logger.info(f"Total comparison duration: {total_duration}")
         
         # Generate summary
         self._generate_comparison_summary(comparison_results)
@@ -329,11 +443,37 @@ class BaselineComparison:
         results_file = f"baseline_comparison_results_{timestamp}.json"
         
         try:
-            with open(results_file, 'w') as f:
-                json.dump(results, f, indent=2, default=str)
-            self.logger.info(f"💾 Results saved to: {results_file}")
+            # Save with pretty formatting
+            with open(results_file, 'w', encoding='utf-8') as f:
+                json.dump(results, f, indent=2, default=str, ensure_ascii=False)
+            
+            # Also save a summary version for quick reference
+            summary_file = f"baseline_comparison_summary_{timestamp}.json"
+            summary_data = {
+                'timestamp': timestamp,
+                'modes_run': results.get('modes_run', []),
+                'total_duration': results.get('comparison_end_time', '') and results.get('comparison_start_time', ''),
+                'summary': results.get('summary', {}),
+                'key_metrics': {}
+            }
+            
+            # Extract key metrics for quick reference
+            for mode, experiment in results.get('experiments', {}).items():
+                if experiment.get('test_metrics') and 'optimization_metrics' in experiment['test_metrics']:
+                    opt_metrics = experiment['test_metrics']['optimization_metrics']
+                    summary_data['key_metrics'][mode] = {
+                        'global_miou': opt_metrics.get('global.mIoU', 'N/A'),
+                        'global_biou': opt_metrics.get('global.BIoU', 'N/A')
+                    }
+            
+            with open(summary_file, 'w', encoding='utf-8') as f:
+                json.dump(summary_data, f, indent=2, default=str, ensure_ascii=False)
+            
+            self.logger.info(f"💾 Full results saved to: {results_file}")
+            self.logger.info(f"💾 Summary results saved to: {summary_file}")
+            
         except Exception as e:
-            self.logger.error(f"❌ Failed to save results: {str(e)}")
+            self.logger.error(f"❌ Failed to save results: {str(e)}", exc_info=True)
 
 
 def main():

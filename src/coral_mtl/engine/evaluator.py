@@ -6,8 +6,8 @@ from typing import Any, Dict, List
 
 
 from .inference import SlidingWindowInferrer
-from .metrics import AbstractCoralMetrics
-from coral_mtl.utils.metrics_storer import MetricsStorer
+from ..metrics.metrics import AbstractCoralMetrics
+from ..metrics.metrics_storer import MetricsStorer, AdvancedMetricsProcessor
 
 class Evaluator:
     """
@@ -24,7 +24,8 @@ class Evaluator:
                  test_loader: torch.utils.data.DataLoader,
                  metrics_calculator: AbstractCoralMetrics,
                  metrics_storer: MetricsStorer,
-                 config: object):
+                 config: object,
+                 metrics_processor: AdvancedMetricsProcessor = None):
         """
         Initializes the Evaluator.
 
@@ -37,11 +38,13 @@ class Evaluator:
             metrics_storer (MetricsStorer): An initialized MetricsStorer for saving metrics.
             config (object): A configuration object containing paths and parameters, such as
                 DEVICE, CHECKPOINT_PATH, OUTPUT_DIR, PATCH_SIZE, PRIMARY_TASKS etc.
+            metrics_processor (AdvancedMetricsProcessor): Advanced metrics processor for Tier 2/3 system.
         """
         self.model = model
         self.test_loader = test_loader
         self.metrics_calculator = metrics_calculator
         self.metrics_storer = metrics_storer
+        self.metrics_processor = metrics_processor
         self.config = config
         self.device = torch.device(config.device)
         self.output_dir = Path(config.output_dir)
@@ -79,6 +82,11 @@ class Evaluator:
         try:
             # Open file handle for the duration of the evaluation run
             self.metrics_storer.open_for_run(is_testing=True)
+            
+            # Start the advanced metrics processor if available
+            if self.metrics_processor:
+                self.metrics_processor.start()
+            
             loop = tqdm(self.test_loader, desc="Evaluating on Test Set")
             
             with torch.no_grad():
@@ -112,34 +120,67 @@ class Evaluator:
                     if len(stitched_predictions_logits) == 1 and 'segmentation' in stitched_predictions_logits:
                         # This is a baseline model - extract the single tensor for CoralMetrics
                         predictions_for_metrics = stitched_predictions_logits['segmentation']
+                        predictions_logits_for_tier1 = stitched_predictions_logits['segmentation']
                     else:
                         # This is an MTL model - pass the full dictionary for CoralMTLMetrics
                         predictions_for_metrics = stitched_predictions_logits
+                        predictions_logits_for_tier1 = stitched_predictions_logits
 
-                    # Update metrics calculator with the required data
+                    # Tier 1: Update metrics calculator with logits for comprehensive metrics
                     self.metrics_calculator.update(
                         predictions=predictions_for_metrics,
                         original_targets=original_masks,
                         image_ids=image_ids,
                         epoch=0,  # Test evaluation doesn't have epochs
-                        store_per_image=True  # Enable per-image storage for test evaluation
+                        predictions_logits=predictions_logits_for_tier1,
+                        store_per_image=True,  # Enable per-image storage for test evaluation 
+                        is_testing=True  # Specify this is test evaluation
                     )
+                    
+                    # Tier 2: Dispatch jobs to CPU worker pool (if enabled)  
+                    if self.metrics_processor:
+                        batch_size = original_masks.shape[0]
+                        
+                        # Get prediction masks from logits for Tier 2 processing
+                        if isinstance(predictions_for_metrics, dict):
+                            # MTL model - use first task or create global prediction
+                            first_task_logits = next(iter(predictions_for_metrics.values()))
+                            pred_masks = torch.argmax(first_task_logits, dim=1)
+                        else:
+                            # Baseline model
+                            pred_masks = torch.argmax(predictions_for_metrics, dim=1)
+                        
+                        # Dispatch each image in the batch
+                        for i in range(batch_size):
+                            self.metrics_processor.dispatch_image_job(
+                                image_id=image_ids[i],
+                                pred_mask_tensor=pred_masks[i],
+                                target_mask_tensor=original_masks[i]
+                            )
 
         finally:
-            # Ensure the file handle is always closed, even if errors occur
+            # Ensure all resources are always closed safely
             self.metrics_storer.close()
+            if self.metrics_processor:
+                self.metrics_processor.shutdown()
 
         # --- Step 4: Final Metric Computation and Reporting ---
-        print("\nComputing final metrics from aggregated confusion matrices...")
+        print("\nComputing final metrics from aggregated statistics...")
         final_metrics_report = self.metrics_calculator.compute()
         
         # Save the full, detailed report using the storer
         self.metrics_storer.save_final_report(final_metrics_report, "test_metrics_full_report.json")
-        print(f"Full evaluation report saved to {self.output_dir / 'test_metrics_full_report.json'}")
+        print(f"Tier 1 evaluation report saved to {self.output_dir / 'test_metrics_full_report.json'}")
         print(f"Per-image confusion matrices saved to {self.output_dir / 'test_cms.jsonl'}")
+        
+        if self.metrics_processor:
+            print(f"Tier 2 advanced metrics saved to {self.output_dir / 'advanced_metrics.jsonl'}")
+            print("Note: Two evaluation outputs generated:")
+            print("  1. Tier 1: Fast GPU-aggregated metrics for model selection")
+            print("  2. Tier 2: Comprehensive per-image metrics for analysis")
 
         # Print a high-level summary to the console for quick review
-        print("\n--- Final Test Set Summary ---")
+        print("\n--- Final Test Set Summary (Tier 1) ---")
         optim_metrics = final_metrics_report.get('optimization_metrics', {})
         for key, value in optim_metrics.items():
             if isinstance(value, float):

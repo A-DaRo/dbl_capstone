@@ -8,8 +8,8 @@ import json
 from typing import Dict, Any
 
 from .inference import SlidingWindowInferrer
-from .metrics import AbstractCoralMetrics
-from coral_mtl.utils.metrics_storer import MetricsStorer
+from ..metrics.metrics import AbstractCoralMetrics
+from ..metrics.metrics_storer import MetricsStorer, AdvancedMetricsProcessor
 
 class Trainer:
     """
@@ -20,13 +20,15 @@ class Trainer:
     and optional integration with Optuna for hyperparameter tuning.
     """
     def __init__(self, model, train_loader, val_loader, loss_fn, metrics_calculator: AbstractCoralMetrics,
-                 metrics_storer: MetricsStorer, optimizer, scheduler, config, trial: optuna.Trial = None):
+                 metrics_storer: MetricsStorer, optimizer, scheduler, config, trial: optuna.Trial = None,
+                 metrics_processor: AdvancedMetricsProcessor = None):
         self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.loss_fn = loss_fn
         self.metrics_calculator = metrics_calculator
         self.metrics_storer = metrics_storer
+        self.metrics_processor = metrics_processor  # Tier 2/3 processor
         self.optimizer = optimizer
         self.scheduler = scheduler
         self.config = config
@@ -41,6 +43,8 @@ class Trainer:
         
         print(f"Training device: {self.device}")
         print(f"Mixed precision (FP16) enabled: {self.use_mixed_precision}")
+        if self.metrics_processor:
+            print(f"Advanced metrics processing enabled with {self.metrics_processor.num_cpu_workers} workers")
         
         self.best_metric = -1.0
         self.training_log = defaultdict(list)
@@ -92,7 +96,7 @@ class Trainer:
     def _validate_one_epoch(self, epoch: int = None) -> Dict[str, Any]:
         """
         Executes a single validation epoch using sliding window inference.
-        It computes a full metrics report and stores per-image confusion matrices.
+        It computes a full metrics report and dispatches data to both Tier 1 and Tier 2 systems.
         """
         self.model.eval()
         
@@ -120,21 +124,44 @@ class Trainer:
                 if len(stitched_predictions_logits) == 1 and 'segmentation' in stitched_predictions_logits:
                     # This is a baseline model - extract the single tensor for CoralMetrics
                     predictions_for_metrics = stitched_predictions_logits['segmentation']
+                    predictions_logits_for_tier1 = stitched_predictions_logits['segmentation']
                 else:
                     # This is an MTL model - pass the full dictionary for CoralMTLMetrics
                     predictions_for_metrics = stitched_predictions_logits
+                    predictions_logits_for_tier1 = stitched_predictions_logits
 
-                # Update metrics with the required data payload
-                # Disable per-image storage during training to speed up validation
+                # Tier 1: Update metrics calculator with logits for GPU-based computation
                 self.metrics_calculator.update(
                     predictions=predictions_for_metrics,
                     original_targets=original_masks,
                     image_ids=image_ids,
                     epoch=epoch,
+                    predictions_logits=predictions_logits_for_tier1,
                     store_per_image=False  # Skip expensive disk I/O during training
                 )
+                
+                # Tier 2: Dispatch jobs to CPU worker pool (if enabled)
+                if self.metrics_processor:
+                    batch_size = original_masks.shape[0]
+                    
+                    # Get prediction masks from logits for Tier 2 processing
+                    if isinstance(predictions_for_metrics, dict):
+                        # MTL model - use first task or create global prediction
+                        first_task_logits = next(iter(predictions_for_metrics.values()))
+                        pred_masks = torch.argmax(first_task_logits, dim=1)
+                    else:
+                        # Baseline model
+                        pred_masks = torch.argmax(predictions_for_metrics, dim=1)
+                    
+                    # Dispatch each image in the batch
+                    for i in range(batch_size):
+                        self.metrics_processor.dispatch_image_job(
+                            image_id=image_ids[i],
+                            pred_mask_tensor=pred_masks[i],
+                            target_mask_tensor=original_masks[i]
+                        )
         
-        # After the loop, compute the aggregate metrics for the entire validation set
+        # After the loop, compute the aggregate metrics for the entire validation set (Tier 1 only)
         return self.metrics_calculator.compute()
 
     def _should_validate(self, epoch):
@@ -174,6 +201,10 @@ class Trainer:
             # Open the JSONL file handle once for the entire training run
             self.metrics_storer.open_for_run(is_testing=False)
             
+            # Start the advanced metrics processor if available
+            if self.metrics_processor:
+                self.metrics_processor.start()
+            
             for epoch in range(self.config.epochs):
                 print(f"\n===== Epoch {epoch+1}/{self.config.epochs} =====")
                 self._train_one_epoch()
@@ -211,8 +242,10 @@ class Trainer:
                         self.trial.report(self.best_metric, epoch)  # Report current best
         
         finally:
-            # Ensure the file handle is always closed safely
+            # Ensure all resources are always closed safely
             self.metrics_storer.close()
+            if self.metrics_processor:
+                self.metrics_processor.shutdown()
         
         print("\n--- Training Complete ---")
         # The history is now managed by the storer, so we don't return it directly

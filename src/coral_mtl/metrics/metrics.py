@@ -11,7 +11,7 @@ import numpy as np
 from typing import Dict, List, Any, Tuple
 from abc import ABC, abstractmethod
 from coral_mtl.utils.task_splitter import TaskSplitter
-from coral_mtl.utils.metrics_storer import MetricsStorer, AsyncMetricsStorer
+from .metrics_storer import MetricsStorer, AsyncMetricsStorer, AdvancedMetricsProcessor
 
 
 EPS = 1e-6
@@ -79,9 +79,41 @@ class AbstractCoralMetrics(ABC):
         }
         # Initialize global BIoU stats with explicit float values
         self.global_biou_stats = {'intersection': 0.0, 'union': 0.0}
+        
+        # Tier 1 - New GPU-based accumulators for advanced metrics
+        # Boundary statistics (GPU tensors for efficient accumulation)
+        self.boundary_tp_global = torch.zeros(1, dtype=torch.float32, device=self.device)
+        self.boundary_fp_global = torch.zeros(1, dtype=torch.float32, device=self.device)
+        self.boundary_fn_global = torch.zeros(1, dtype=torch.float32, device=self.device)
+        
+        # Probabilistic statistics (for ECE, NLL, Brier)
+        self.total_nll = torch.zeros(1, dtype=torch.float32, device=self.device)
+        self.total_brier = torch.zeros(1, dtype=torch.float32, device=self.device)
+        self.total_pixels = torch.zeros(1, dtype=torch.int64, device=self.device)
+        
+        # ECE bins (10 bins for confidence calibration)
+        num_bins = 10
+        self.ece_bin_boundaries = torch.linspace(0, 1, num_bins + 1, device=self.device)
+        self.ece_bin_confidences = torch.zeros(num_bins, dtype=torch.float32, device=self.device)
+        self.ece_bin_accuracies = torch.zeros(num_bins, dtype=torch.float32, device=self.device)
+        self.ece_bin_counts = torch.zeros(num_bins, dtype=torch.int64, device=self.device)
 
     @abstractmethod
-    def update(self, predictions: Any, original_targets: torch.Tensor, image_ids: List[str], epoch: int):
+    def update(self, predictions: Any, original_targets: torch.Tensor, image_ids: List[str], 
+              epoch: int, predictions_logits: Any = None, store_per_image: bool = True, 
+              is_testing: bool = False):
+        """
+        Update metrics with batch predictions and targets.
+        
+        Args:
+            predictions: Model predictions (argmax of logits)
+            original_targets: Ground truth targets
+            image_ids: List of image identifiers
+            epoch: Current training epoch
+            predictions_logits: Raw model logits for probabilistic metrics (Tier 1)
+            store_per_image: Whether to store per-image data (Tier 2)
+            is_testing: Whether this is test evaluation
+        """
         pass
 
     def _update_biou_stats_gpu(self, pred_mask: torch.Tensor, target_mask: torch.Tensor, task_name: str, level: str):
@@ -141,6 +173,84 @@ class AbstractCoralMetrics(ABC):
 
         self.global_biou_stats['intersection'] += total_intersection
         self.global_biou_stats['union'] += total_union
+
+    def _update_boundary_stats_gpu(self, pred_mask: torch.Tensor, target_mask: torch.Tensor):
+        """Update boundary statistics for global Boundary F1 metric on GPU."""
+        # Process all foreground classes (skip background class 0)
+        for c in range(1, self.splitter.num_global_classes):
+            gt_c = (target_mask == c)
+            pred_c = (pred_mask == c)
+            
+            # Skip if no ground truth for this class
+            if not torch.any(gt_c):
+                continue
+                
+            # Create boundary masks
+            gt_boundary = gpu_binary_dilation(gt_c, self.boundary_thickness) & ~gt_c
+            pred_boundary = gpu_binary_dilation(pred_c, self.boundary_thickness) & ~pred_c
+            
+            # Calculate boundary metrics
+            tp = torch.sum(gt_boundary & pred_boundary).float()
+            fp = torch.sum(pred_boundary & ~gt_boundary).float()  
+            fn = torch.sum(gt_boundary & ~pred_boundary).float()
+            
+            # Accumulate stats
+            self.boundary_tp_global += tp
+            self.boundary_fp_global += fp
+            self.boundary_fn_global += fn
+
+    def _update_probabilistic_stats_gpu(self, logits: torch.Tensor, target_mask: torch.Tensor):
+        """Update probabilistic statistics (NLL, Brier, ECE) on GPU."""
+        # Convert logits to probabilities
+        probs = F.softmax(logits, dim=1)  # Shape: [B, C, H, W]
+        
+        # Flatten for easier processing
+        probs_flat = probs.view(probs.shape[0], probs.shape[1], -1)  # [B, C, H*W]
+        targets_flat = target_mask.view(target_mask.shape[0], -1)    # [B, H*W]
+        
+        batch_size, num_classes, num_pixels = probs_flat.shape
+        
+        # Create valid mask (exclude ignore_index)
+        valid_mask = (targets_flat != self.ignore_index)
+        
+        for b in range(batch_size):
+            valid_pixels = valid_mask[b]
+            if not torch.any(valid_pixels):
+                continue
+                
+            batch_probs = probs_flat[b, :, valid_pixels]  # [C, valid_pixels]
+            batch_targets = targets_flat[b, valid_pixels]  # [valid_pixels]
+            
+            # NLL calculation
+            log_probs = torch.log(batch_probs + 1e-8)
+            nll = F.nll_loss(log_probs.t(), batch_targets, reduction='sum')
+            self.total_nll += nll
+            
+            # Brier Score calculation  
+            # Create one-hot targets
+            targets_one_hot = F.one_hot(batch_targets, num_classes).float()  # [valid_pixels, C]
+            brier_scores = torch.sum((batch_probs.t() - targets_one_hot) ** 2, dim=1)
+            self.total_brier += torch.sum(brier_scores)
+            
+            # ECE calculation
+            # Get confidence (max probability) and predictions
+            confidences, predictions = torch.max(batch_probs, dim=0)
+            correct = (predictions == batch_targets)
+            
+            # Assign to bins
+            bin_indices = torch.searchsorted(self.ece_bin_boundaries[1:], confidences)
+            bin_indices = torch.clamp(bin_indices, 0, len(self.ece_bin_boundaries) - 2)
+            
+            # Accumulate per bin
+            for bin_idx in range(len(self.ece_bin_boundaries) - 1):
+                bin_mask = (bin_indices == bin_idx)
+                if torch.any(bin_mask):
+                    self.ece_bin_confidences[bin_idx] += torch.sum(confidences[bin_mask])
+                    self.ece_bin_accuracies[bin_idx] += torch.sum(correct[bin_mask].float())
+                    self.ece_bin_counts[bin_idx] += torch.sum(bin_mask)
+            
+            # Track total pixels processed
+            self.total_pixels += torch.sum(valid_pixels)
 
     def _compute_metrics_from_cm(self, cm: np.ndarray, class_names: List[str]) -> Dict[str, Any]:
         tp = np.diag(cm)
@@ -225,25 +335,81 @@ class AbstractCoralMetrics(ABC):
             report['optimization_metrics']['global.background_error'] = global_summary['TIDE_errors']['background_error'] 
             report['optimization_metrics']['global.missed_error'] = global_summary['TIDE_errors']['missed_error']
 
+        # Tier 1 Advanced Metrics (GPU-aggregated)
+        # Boundary F1 (from boundary TP, FP, FN)
+        boundary_tp = self.boundary_tp_global.item()
+        boundary_fp = self.boundary_fp_global.item()
+        boundary_fn = self.boundary_fn_global.item()
+        
+        boundary_precision = boundary_tp / (boundary_tp + boundary_fp + EPS)
+        boundary_recall = boundary_tp / (boundary_tp + boundary_fn + EPS)
+        boundary_f1 = 2 * (boundary_precision * boundary_recall) / (boundary_precision + boundary_recall + EPS)
+        
+        report['optimization_metrics']['global.Boundary_F1'] = boundary_f1
+        report['optimization_metrics']['global.Boundary_Precision'] = boundary_precision
+        report['optimization_metrics']['global.Boundary_Recall'] = boundary_recall
+        
+        # Probabilistic Metrics (NLL, Brier, ECE)
+        total_pixels = self.total_pixels.item()
+        if total_pixels > 0:
+            # NLL and Brier (normalized by total pixels)
+            nll = (self.total_nll / total_pixels).item()
+            brier = (self.total_brier / total_pixels).item()
+            
+            report['optimization_metrics']['global.NLL'] = nll
+            report['optimization_metrics']['global.Brier_Score'] = brier
+            
+            # ECE calculation
+            ece = 0.0
+            for bin_idx in range(len(self.ece_bin_boundaries) - 1):
+                bin_count = self.ece_bin_counts[bin_idx].item()
+                if bin_count > 0:
+                    bin_accuracy = (self.ece_bin_accuracies[bin_idx] / bin_count).item()
+                    bin_confidence = (self.ece_bin_confidences[bin_idx] / bin_count).item()
+                    ece += (bin_count / total_pixels) * abs(bin_accuracy - bin_confidence)
+            
+            report['optimization_metrics']['global.ECE'] = ece
+        else:
+            report['optimization_metrics']['global.NLL'] = 0.0
+            report['optimization_metrics']['global.Brier_Score'] = 0.0
+            report['optimization_metrics']['global.ECE'] = 0.0
+
         return report
 
 class CoralMTLMetrics(AbstractCoralMetrics):
     """Metrics calculator for Multi-Task Learning models."""
-    def update(self, predictions: Dict[str, torch.Tensor], original_targets: torch.Tensor, image_ids: List[str], epoch: int, store_per_image: bool = True):
-        preds = {task: torch.argmax(logits, dim=1) for task, logits in predictions.items()}
+    def update(self, predictions: Dict[str, torch.Tensor], original_targets: torch.Tensor, image_ids: List[str], 
+              epoch: int, predictions_logits: Dict[str, torch.Tensor] = None, store_per_image: bool = True, 
+              is_testing: bool = False):
+        # Use provided logits if available, otherwise predictions are assumed to be logits  
+        if predictions_logits is not None:
+            preds = {task: torch.argmax(logits, dim=1) for task, logits in predictions_logits.items()}
+            logits = predictions_logits
+        else:
+            # Assume predictions are logits for backwards compatibility
+            preds = {task: torch.argmax(logits, dim=1) for task, logits in predictions.items()}
+            logits = predictions
+            
         mask = (original_targets != self.ignore_index)
-        
         batch_size = original_targets.shape[0]
         global_target = self.splitter.global_mapping_torch.to(self.device)[original_targets]
 
-        # Calculate global predictions for BIoU
+        # Calculate global predictions for BIoU and other metrics
         pred_fg = torch.zeros_like(original_targets, dtype=torch.long)
         for p in preds.values():
             pred_fg |= (p > 0)
         global_pred = pred_fg * self.splitter.global_mapping_torch.to(self.device)[original_targets]
 
-        # Update BIoU stats on GPU
+        # Tier 1 GPU Updates (Fast aggregation)
         self._update_global_biou_stats_gpu(global_pred, global_target)
+        self._update_boundary_stats_gpu(global_pred, global_target)
+        
+        # Update probabilistic stats if logits are available (for primary task)
+        if logits and len(logits) > 0:
+            # Use the first task's logits as representative for global metrics
+            first_task_logits = next(iter(logits.values()))
+            if first_task_logits is not None:
+                self._update_probabilistic_stats_gpu(first_task_logits, global_target)
 
         for i in range(batch_size):
             img_id = image_ids[i]
@@ -298,24 +464,58 @@ class CoralMTLMetrics(AbstractCoralMetrics):
                 per_image_cms['global'] = global_cm_update.cpu().numpy()
                 per_image_predictions['global'] = global_pred_img.cpu().numpy()
                 
-                # Use async storage if available, otherwise fallback to sync
+                # Get task definitions for class counts (needed for BIoU computation)
+                num_classes_per_task = {}
+                target_masks_for_biou = {}
+                
+                for task, details in self.splitter.hierarchical_definitions.items():
+                    num_classes_per_task[task] = len(details['ungrouped']['id2label'])
+                    # Get target mask for this task
+                    mapping = torch.from_numpy(details['ungrouped']['mapping_array']).to(self.device)
+                    target_masks_for_biou[task] = mapping[original_targets[i]].cpu().numpy()
+                
+                num_classes_per_task['global'] = self.splitter.num_global_classes
+                target_masks_for_biou['global'] = global_target[i].cpu().numpy()
+                
+                # Use new storage method that computes per-image metrics
                 if self.async_storer:
-                    self.async_storer.store_per_image_cms(img_id, per_image_cms, per_image_predictions, is_testing=False, epoch=epoch)
+                    self.async_storer.store_per_image_cms_with_metrics(
+                        img_id, per_image_cms, per_image_predictions, target_masks_for_biou,
+                        num_classes_per_task, is_testing=is_testing, epoch=epoch
+                    )
                 else:
-                    self.storer.store_per_image_cms(img_id, per_image_cms, per_image_predictions, is_testing=False, epoch=epoch)
+                    self.storer.store_per_image_cms_with_metrics(
+                        img_id, per_image_cms, per_image_predictions, target_masks_for_biou,
+                        num_classes_per_task, is_testing=is_testing, epoch=epoch
+                    )
 
 class CoralMetrics(AbstractCoralMetrics):
     """Metrics calculator for baseline (single-head) models."""
-    def update(self, predictions: torch.Tensor, original_targets: torch.Tensor, image_ids: List[str], epoch: int, store_per_image: bool = True):
-        flat_preds = torch.argmax(predictions, dim=1)
+    def update(self, predictions: torch.Tensor, original_targets: torch.Tensor, image_ids: List[str], 
+              epoch: int, predictions_logits: torch.Tensor = None, store_per_image: bool = True, 
+              is_testing: bool = False):
+        # Use provided logits if available, otherwise assume predictions are logits
+        if predictions_logits is not None:
+            logits = predictions_logits
+            flat_preds = torch.argmax(logits, dim=1)
+        else:
+            # Assume predictions are logits for backwards compatibility
+            logits = predictions
+            flat_preds = torch.argmax(predictions, dim=1)
+            
         mask = (original_targets != self.ignore_index)
         
         original_preds = self.splitter.flat_to_original_mapping_torch.to(self.device)[flat_preds]
         global_target = self.splitter.global_mapping_torch.to(self.device)[original_targets]
         global_pred = self.splitter.global_mapping_torch.to(self.device)[original_preds]
         
-        # Update BIoU stats on GPU
+        # Tier 1 GPU Updates (Fast aggregation)
         self._update_global_biou_stats_gpu(global_pred, global_target)
+        self._update_boundary_stats_gpu(global_pred, global_target)
+        
+        # Update probabilistic stats if logits are available
+        if logits is not None:
+            self._update_probabilistic_stats_gpu(logits, global_target)
         
         batch_size = original_targets.shape[0]
         for i in range(batch_size):
@@ -366,8 +566,27 @@ class CoralMetrics(AbstractCoralMetrics):
                 per_image_cms['global'] = global_cm_update.cpu().numpy()
                 per_image_predictions['global'] = global_pred[i].cpu().numpy()
                 
-                # Use async storage if available, otherwise fallback to sync
+                # Get task definitions for class counts (needed for BIoU computation)
+                num_classes_per_task = {}
+                target_masks_for_biou = {}
+                
+                for task, details in self.splitter.hierarchical_definitions.items():
+                    num_classes_per_task[task] = len(details['ungrouped']['id2label'])
+                    # Get target mask for this task
+                    mapping = torch.from_numpy(details['ungrouped']['mapping_array']).to(self.device)
+                    target_masks_for_biou[task] = mapping[original_targets[i]].cpu().numpy()
+                
+                num_classes_per_task['global'] = self.splitter.num_global_classes
+                target_masks_for_biou['global'] = global_target[i].cpu().numpy()
+                
+                # Use new storage method that computes per-image metrics
                 if self.async_storer:
-                    self.async_storer.store_per_image_cms(img_id, per_image_cms, per_image_predictions, is_testing=False, epoch=epoch)
+                    self.async_storer.store_per_image_cms_with_metrics(
+                        img_id, per_image_cms, per_image_predictions, target_masks_for_biou,
+                        num_classes_per_task, is_testing=is_testing, epoch=epoch
+                    )
                 else:
-                    self.storer.store_per_image_cms(img_id, per_image_cms, per_image_predictions, is_testing=False, epoch=epoch)
+                    self.storer.store_per_image_cms_with_metrics(
+                        img_id, per_image_cms, per_image_predictions, target_masks_for_biou,
+                        num_classes_per_task, is_testing=is_testing, epoch=epoch
+                    )

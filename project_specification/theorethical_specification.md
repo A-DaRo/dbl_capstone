@@ -464,3 +464,49 @@ The hierarchical framework is inherently extensible. New tasks can be added to p
 
 ---
 For technical details, see the [**Technical Specification**](./technical_specification.md).
+
+---
+
+## 11. Theoretical Rationale for Concurrent, Two‑Tier Evaluation
+
+Robust evaluation for scientific applications must balance statistical rigor with practical constraints (GPU memory, CPU throughput, and I/O). We adopt a two‑tier evaluation strategy grounded in theory of calibration, boundary sensitivity, and task‑specific complexity.
+
+### 11.1. Calibration Theory: NLL, Brier Score, and ECE
+
+Well‑calibrated probabilities are essential when predictions inform ecological decisions. Three complementary measures capture different aspects:
+
+- Negative Log‑Likelihood (NLL): Proper scoring rule measuring the log loss of predicted distributions; strongly penalizes overconfident mistakes, aligning with decision‑theory for risk‑averse scientific inference.
+- Brier Score: Mean squared error on probability assignments; sensitive to both calibration and refinement, providing an interpretable, bounded scale.
+- Expected Calibration Error (ECE): Binning‑based approximation to calibration error across confidence ranges; highlights systematic over/under‑confidence. While an approximation, ECE is highly actionable for post‑hoc calibration.
+
+Computing these on logits at run‑time encourages GPU‑resident accumulation with minimal synchronization, reserving CPU for final normalization.
+
+### 11.2. Boundary‑Aware Evaluation
+
+For benthic ecology, precise boundaries affect biomass, coverage, and change‑detection analyses. Boundary IoU (BIoU) emphasizes correctness of object edges and is less forgiving of “thick” boundaries than standard IoU. Accumulating boundary TP/FP/FN statistics on GPU enables faithful boundary tracking without costly per‑image CPU post‑processing during training.
+
+### 11.3. Why CPU‑Heavy Metrics Are Separate
+
+Several scientifically valuable metrics are computationally intensive or rely on specialized libraries:
+
+- Surface distance metrics (ASSD, HD95): Require distance transforms and connected component analysis (SimpleITK/scipy); sensitive to instance shapes and topologies.
+- Clustering metrics (ARI, Variation of Information): Compare labelings with information‑theoretic grounding; require contingency tables over connected components.
+- Panoptic metrics (PQ/AP): Combine recognition and segmentation quality (panopticapi/pycocotools); instance matching and bipartite assignments are non‑trivial.
+
+These are best executed in a CPU worker pool, decoupled from the GPU loop, to preserve training throughput while still collecting rich scientific diagnostics.
+
+### 11.4. Asynchronous Streaming and Statistical Sufficiency
+
+Streaming per‑image results to JSONL supports:
+
+- Incremental analysis: Early look at failure modes without waiting for entire runs
+- Robust aggregation: Post‑hoc computation of dataset‑level statistics, confidence intervals, and stratified summaries
+- Reproducibility: Raw per‑image metrics retained for secondary analyses and meta‑studies
+
+From a statistical perspective, Tier 1 accumulators are sufficient statistics for CM‑based and calibration‑based measures; Tier 2 emits raw observables for metrics lacking compact sufficient summaries (e.g., instance‑level matches), justifying the split by sufficiency and cost.
+
+### 11.5. Practical Implications for Scientific Workflows
+
+- During training/validation, use Tier 1 to drive model selection with stable, low‑variance signals (mIoU, BIoU, calibration).
+- During final testing, enable the full Tier 2 gauntlet to characterize ecological and instance‑level behavior comprehensively.
+- Maintain clear provenance by storing both aggregated Tier 1 reports and Tier 2 JSONL streams; combine them in analysis notebooks for publication‑grade summaries.

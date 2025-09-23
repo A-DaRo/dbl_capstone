@@ -17,3 +17,5 @@ plotly
 pandas
 segmentation_models_pytorch
 tabulate
+simpleitk
+scikit-image

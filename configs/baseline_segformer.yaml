@@ -51,6 +51,19 @@ metrics:
   # This should be consistent with the ignore_index in the loss function.
   ignore_index: 0
 
+# --------------------------------------------------------------------------
+# Advanced Metrics Processing (Tier 2/3 System)
+# --------------------------------------------------------------------------
+metrics_processor:
+  # Set to false to disable advanced metrics and use only Tier 1 (faster)
+  enabled: false
+  
+  # Number of CPU worker processes (only used if enabled: true)
+  num_cpu_workers: 8
+  
+  # Advanced metrics to compute (only used if enabled: true)
+  tasks: ["ASSD", "HD95"]
+
 
 # --------------------------------------------------------------------------
 # The trainer section is needed to calculate total training steps for the scheduler.

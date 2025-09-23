@@ -32,12 +32,19 @@ coral-mtl-project/
 │   │   ├── trainer.py               # Training orchestration with mixed precision
 │   │   ├── evaluator.py             # Comprehensive testing pipeline
 │   │   ├── losses.py                # Multi-task and baseline loss functions
-│   │   ├── metrics.py               # Hierarchical metrics calculation
 │   │   ├── optimizer.py             # Optimizer and scheduler factory
 │   │   └── inference.py             # Sliding window inference engine
+│   ├── metrics/                     # Metrics calculation and persistence
+│   │   ├── metrics.py               # Hierarchical metrics calculation
+│   │   └── metrics_storer.py        # Metrics persistence and storage
+│   ├── scripts/                     # Data processing and analysis scripts
+│   │   ├── analyze_patch_distribution.py    # Statistical analysis utilities
+│   │   ├── compare_distributions.py         # Distribution comparison tools
+│   │   ├── create_pds_dataset.py           # PDS dataset generation
+│   │   ├── create_pds_patches_and_report.py # Patch creation and analysis
+│   │   └── id2labels_labels2colors_coralscapes.py # Label mapping utilities
 │   └── utils/                       # Supporting utilities
 │       ├── task_splitter.py         # Task definition parsing and mapping
-│       ├── metrics_storer.py        # Metrics persistence and storage
 │       └── visualization.py         # Comprehensive plotting and analysis
 ├── tests/                           # Unit and integration tests
 └── experiments/                     # Output directory for all training artifacts
@@ -377,7 +384,27 @@ class CoralLoss(nn.Module):
 - **Consistency Regularization**: Penalizes logically inconsistent predictions
 - **Comprehensive Logging**: Returns detailed loss component breakdown
 
-### 5.4. Metrics Calculation
+### 5.4. Optimizer Factory
+
+```python
+def create_optimizer_and_scheduler(
+    model: nn.Module, learning_rate: float = 6e-5,
+    weight_decay: float = 0.01, adam_betas: Tuple[float, float] = (0.9, 0.999),
+    num_training_steps: int = 10000, num_warmup_steps: int = 1500,
+    power: float = 1.0) -> Tuple[optim.Optimizer, Any]:
+    """Create AdamW optimizer with polynomial decay + warmup scheduler."""
+```
+
+#### Optimizer Features:
+- **Parameter Grouping**: Separate weight decay for different parameter types
+- **Polynomial Decay**: Stable learning rate schedule with warmup
+- **Transformer-Optimized**: Best practices for SegFormer-based architectures
+
+---
+
+## 6. Metrics Components: `src/coral_mtl/metrics/`
+
+### 6.1. Metrics Calculation
 
 ```python
 class AbstractCoralMetrics(ABC):
@@ -412,25 +439,37 @@ class CoralMetrics(AbstractCoralMetrics):
 - **Global Metrics**: Unified metrics across all classes for comprehensive comparison
 - **TIDE-Inspired Error Analysis**: Classification, background, and missed error decomposition
 
-### 5.5. Optimizer Factory
+### 6.2. Metrics Storage & Persistence
 
 ```python
-def create_optimizer_and_scheduler(
-    model: nn.Module, learning_rate: float = 6e-5,
-    weight_decay: float = 0.01, adam_betas: Tuple[float, float] = (0.9, 0.999),
-    num_training_steps: int = 10000, num_warmup_steps: int = 1500,
-    power: float = 1.0) -> Tuple[optim.Optimizer, Any]:
-    """Create AdamW optimizer with polynomial decay + warmup scheduler."""
+class MetricsStorer:
+    """Handles persistent storage of metrics and raw evaluation data."""
+    
+    def __init__(self, experiment_name: str, output_dir: Path):
+        """Initialize with experiment identification and output directory."""
+        
+    def store_batch_results(self, image_ids: List[str], confusion_matrices: List[np.ndarray]):
+        """Store per-image confusion matrices in JSONL format."""
+        
+    def finalize_and_save(self, metrics_report: Dict[str, Any]):
+        """Save final aggregated metrics report."""
+
+class AsyncMetricsStorer(MetricsStorer):
+    """Asynchronous version for high-throughput scenarios."""
+
+class AdvancedMetricsProcessor:
+    """Advanced analysis and visualization of stored metrics."""
 ```
 
-#### Optimizer Features:
-- **Parameter Grouping**: Separate weight decay for different parameter types
-- **Polynomial Decay**: Stable learning rate schedule with warmup
-- **Transformer-Optimized**: Best practices for SegFormer-based architectures
+#### Storage Features:
+- **JSONL Streaming**: Memory-efficient per-image data storage
+- **Safe Writing**: Atomic file operations to prevent corruption
+- **Comprehensive Logging**: Stores both aggregated metrics and raw confusion matrices
+- **Flexible Output**: Supports both validation and testing workflows
 
 ---
 
-## 6. Utility Components: `src/coral_mtl/utils/`
+## 7. Utility Components: `src/coral_mtl/utils/`
 
 ### 6.1. Task Definition Processing
 
@@ -546,7 +585,21 @@ class Visualizer:
 
 ---
 
-## 7. Configuration-Driven Architecture
+## 8. Scripts Components: `src/coral_mtl/scripts/`
+
+The scripts directory contains utility scripts for data processing and analysis:
+
+### 8.1. Data Processing Scripts
+
+- **`analyze_patch_distribution.py`**: Statistical analysis utilities for patch distributions
+- **`compare_distributions.py`**: Tools for comparing data distributions across splits
+- **`create_pds_dataset.py`**: PDS dataset generation utilities
+- **`create_pds_patches_and_report.py`**: Patch creation and comprehensive reporting
+- **`id2labels_labels2colors_coralscapes.py`**: Label mapping and color palette utilities
+
+---
+
+## 9. Configuration-Driven Architecture
 
 The system uses YAML configuration files to control all aspects of model training and evaluation. The ExperimentFactory reads these configurations and instantiates components accordingly.
 
@@ -604,7 +657,7 @@ This pattern ensures that components are created in the correct order with prope
 
 ---
 
-## 8. Advanced Features
+## 10. Advanced Features
 
 ### 8.1. Sliding Window Inference
 
@@ -637,7 +690,7 @@ All training components support automatic mixed precision:
 
 ---
 
-## 9. Extension Guide
+## 11. Extension Guide
 
 ### 9.1. Adding New Tasks
 
@@ -872,7 +925,7 @@ class CompositeHierarchicalLoss(nn.Module):
 
 ---
 
-### 8. Evaluation Metrics: `src/coral_mtl/engine/metrics.py`
+### 8. Evaluation Metrics: `src/coral_mtl/metrics/metrics.py`
 
 Metrics are calculated using a helper class that accumulates confusion matrices.
 
@@ -923,6 +976,113 @@ To add a new task (e.g., "Disease Segmentation") to the model:
 4.  **Update Loss Function (`losses.py`):** In `CompositeHierarchicalLoss`, add the calculation for `loss_disease`. If it's a new primary task, you must also add a new `nn.Parameter` for its uncertainty (`log_var_disease`) and include it in the `primary_loss` calculation. If it's an auxiliary task, simply add it to the `aux_loss` sum.
 5.  **Update Metrics (`metrics.py`):** Add the new task to the `MetricsCalculator` so its performance is tracked.
 6.  **Add Tests (`tests/`):** Add a test case to `test_dataset.py` to verify the new label transformation and update the model/loss tests to account for the new task.
+
+---
+
+## 11. Two‑Tier Metric Evaluation Architecture
+
+This project implements a concurrent, two‑tier metrics system that separates fast, GPU‑friendly aggregation from expensive CPU‑only analytics. The design minimizes GPU↔CPU transfers, avoids I/O contention, and keeps training/validation loops non‑blocking.
+
+### 11.1. Overview
+
+- Tier 1 (GPU Collector): Real‑time accumulation of confusion matrices and boundary/probabilistic statistics directly on GPU; final normalization on CPU at epoch end.
+- Tier 2 (Advanced CPU Processor): Asynchronous dispatcher feeding a pool of CPU workers and a dedicated writer process to compute and stream per‑image advanced metrics to JSONL.
+
+Key classes and files:
+- Tier 1: `AbstractCoralMetrics`, `CoralMTLMetrics`, `CoralMetrics` in `src/coral_mtl/metrics/metrics.py`
+- Tier 2: `AdvancedMetricsProcessor` in `src/coral_mtl/metrics/metrics_storer.py`
+- Orchestration: `Trainer`, `Evaluator` in `src/coral_mtl/engine/`, and factory wiring in `src/coral_mtl/ExperimentFactory.py`
+
+### 11.2. Tier 1 — GPU Collector
+
+Contract:
+- Input per batch: predictions (dict or tensor), original_targets (global mask), image_ids, and optional predictions_logits.
+- Operations: Update accumulators for per‑task/global confusion matrices, Boundary IoU stats, and probabilistic calibration stats (NLL, Brier, ECE bins) using logits.
+- Output at compute(): Structured report with grouped/ungrouped task metrics, global metrics, diagnostic errors, boundary IoU, and calibration metrics added to `optimization_metrics`.
+
+Implementation notes:
+- Accumulators added in `AbstractCoralMetrics.reset()`:
+    - Confusion matrices per task and global space
+    - Boundary stats (TP/FP/FN) for BIoU, including global BIoU
+    - Probabilistic accumulators: total NLL sum, Brier sum, ECE bin counts/accuracies/confidences, total_pixels
+- GPU helpers aggregate per batch with minimal CPU transfers:
+    - `_update_boundary_stats_gpu(...)`
+    - `_update_global_biou_stats_gpu(...)`
+    - `_update_probabilistic_stats_gpu(logits, target)` (uses representative logits for calibration)
+- `compute()` constructs final metrics, including:
+    - Global BIoU
+    - NLL, Brier Score, and ECE from bin statistics (zero‑safe fallbacks)
+
+### 11.3. Tier 2 — Advanced CPU Processor
+
+Advanced, CPU‑intensive metrics are processed asynchronously to avoid blocking the main loop.
+
+Core components in `AdvancedMetricsProcessor`:
+- Dispatcher API:
+    - `start()`: Spawn multiprocessing Manager, job/result queues, CPU worker pool, and a single writer process
+    - `dispatch_image_job(image_id, pred_mask, target_mask)`: Non‑blocking transfer to CPU and enqueue minimal uint8 arrays per image
+    - `shutdown()`: Graceful termination, drain/flush, join workers and writer
+- Worker Gauntlet (per job, task‑gated):
+    - Surface metrics: ASSD, HD95 (SimpleITK/scipy)
+    - Clustering/segmentation metrics: ARI, Variation of Information (sklearn)
+    - Panoptic metrics: PQ/AP (panopticapi/pycocotools)
+- Writer Process:
+    - Streams one JSON object per image to a JSONL file (validation_cms.jsonl or test_cms.jsonl)
+    - Dedicated single writer avoids file contention across many workers
+
+Outputs:
+- Tier 1: Final JSON report via `MetricsStorer.save_final_report()`
+- Tier 2: JSONL stream with per‑image advanced metrics for downstream analysis
+
+### 11.4. Lifecycle Integration (Trainer/Evaluator)
+
+- The `ExperimentFactory` builds and injects `AdvancedMetricsProcessor` when enabled in config.
+- `Trainer`/`Evaluator` lifecycle:
+    - At run start: `metrics_processor.start()`
+    - For each batch:
+        - Tier 1: `metrics_calculator.update(..., predictions_logits=...)`
+        - Tier 2: derive `pred_mask` (argmax of logits) and call `dispatch_image_job(image_id, pred_mask, original_mask)` per image
+    - On completion or exception: `metrics_processor.shutdown()` in a finally block
+
+This ensures validation/testing remain responsive while advanced metrics are computed in parallel.
+
+### 11.5. Configuration Schema
+
+Add a `metrics_processor` block to your experiment config:
+
+```yaml
+metrics_processor:
+    enabled: true           # enable asynchronous Tier 2 processing
+    num_cpu_workers: 30     # size of the CPU worker pool
+    tasks:                  # which advanced metrics to compute
+        - "ASSD"
+        - "HD95"
+        - "PanopticQuality"
+        - "ARI"
+```
+
+Factory wiring:
+- `ExperimentFactory.get_advanced_metrics_processor()` parses this block and constructs the processor
+- `run_training` and `run_evaluation` inject the processor into `Trainer`/`Evaluator`
+
+### 11.6. Optional Dependencies and Task Gating
+
+Some Tier 2 metrics depend on optional libraries (e.g., SimpleITK, scikit‑image, panopticapi, scikit‑learn). The processor uses lazy imports and task‑gated execution to avoid importing unused libraries. If a dependency is missing while a corresponding task is enabled, the worker will:
+- Log a clear warning per missing package
+- Skip the specific metric for that image
+- Continue processing remaining enabled metrics
+
+Recommendations:
+- Keep Tier 2 tasks minimal during training (or disable entirely) to reduce CPU load
+- Enable full task set for final evaluation where wall‑time is acceptable
+
+### 11.7. Post‑Processing and Aggregation
+
+Tier 2 per‑image outputs (JSONL) are designed for external aggregation (e.g., computing dataset‑wide PQ/AP or percentile summaries of distance metrics). Provide a simple analysis script to:
+- Read JSONL, group by metric/class, and compute aggregates
+- Join with Tier 1 final report for a complete evaluation dossier
+
+File locations and names are managed by `MetricsStorer` based on split (validation/test) and experiment output directory.
 
 ---
 For theoretical background, see the [**Theoretical Specification**](./theorethical_specification.md).
