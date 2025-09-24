@@ -35,8 +35,9 @@ def run_structural_tests():
     suite = unittest.TestSuite()
     
     # Add structural tests
-    from tests import test_structure
+    from tests import test_structure, test_metrics_logic
     suite.addTest(loader.loadTestsFromModule(test_structure))
+    suite.addTest(loader.loadTestsFromModule(test_metrics_logic))
     
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
@@ -50,8 +51,9 @@ def run_unit_tests(deps):
     suite = unittest.TestSuite()
     
     # Always run structural tests
-    from tests import test_structure
+    from tests import test_structure, test_metrics_logic
     suite.addTest(loader.loadTestsFromModule(test_structure))
+    suite.addTest(loader.loadTestsFromModule(test_metrics_logic))
     
     # Add dependency-based tests
     if deps.get('numpy') and deps.get('torch'):
