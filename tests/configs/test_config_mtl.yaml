@@ -1,0 +1,67 @@
+# Test Configuration for Coral-MTL Model
+
+# Experiment Settings
+run_name: "test_coral_mtl"
+output_dir: "tests/outputs/mtl_test"
+seed: 42
+device: "cpu"
+resume_from_checkpoint: null
+
+# Data Settings
+data:
+  dataset_dir: "tests/dataset/coralscapes"
+  pds_path: "tests/dataset/processed/pds_patches"
+  use_pds: true
+  batch_size: 2
+  num_workers: 0
+  pin_memory: false
+  img_size: [128, 128]
+
+# Task Definitions
+tasks:
+  task_definitions_path: "tests/configs/tasks/task_definitions.yaml"
+  primary_task: "health"
+  auxiliary_tasks: ["genus", "biota"]
+
+# Model Settings
+model:
+  name: "CoralMTLModel"
+  encoder:
+    name: "nvidia/mit-b0"
+    pretrained: false
+  decoder:
+    name: "HierarchicalContextAwareDecoder"
+    params:
+      # num_classes will be inferred from tasks
+      # other decoder params can go here
+      
+# Training Settings
+trainer:
+  epochs: 2
+  optimizer:
+    name: "AdamW"
+    params:
+      lr: 0.00006
+  scheduler:
+    name: "LinearLR"
+    params:
+      start_factor: 1.0
+      end_factor: 0.0
+      total_iters: 2
+  loss:
+    name: "CoralMTLLoss"
+    params:
+      # Loss-specific parameters, e.g., uncertainty weights
+      
+# Evaluation Settings
+evaluator:
+  batch_size: 1
+  inference:
+    window_size: [128, 128]
+    stride: [64, 64]
+
+# Metrics Settings
+metrics:
+  enabled: true
+  advanced_metrics:
+    enabled: false

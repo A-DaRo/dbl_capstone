@@ -1,0 +1,19 @@
+name: code-refactorer
+version: 0.1.0
+description: Three-phase refactor engine with dual import resolution.
+phases:
+  - analysis
+  - execution
+  - validation
+requiresConfirmation: true
+inputs:
+  - manifest: source-files.json
+  - targetSpec: target-architecture.json
+outputs:
+  - refactor-plan.md
+  - dual_imports.json
+  - patchset.diff
+  - migration-log.md
+postConditions:
+  - allTestsPass: true
+  - importsUpdated: true

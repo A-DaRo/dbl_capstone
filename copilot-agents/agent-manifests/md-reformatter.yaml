@@ -1,0 +1,17 @@
+name: md-reformatter
+version: 0.1.0
+description: Converts free-form markdown into structured Copilot instruction, prompt, and chatmode files.
+inputs:
+  - pattern: docs/**/*.md
+  - pattern: project_specification/**/*.md
+outputs:
+  - .github/instructions/*.instructions.md
+  - .github/prompts/*.prompt.md
+  - .github/chatmodes/*.chatmode.md
+artifacts:
+  - transformation-manifest.json
+rules:
+  - ensurePromptFrontmatter: true
+  - defaultApplyTo: "**/*.py"
+failures:
+  - ambiguousSectionCreatesCandidate: true

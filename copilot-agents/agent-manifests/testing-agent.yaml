@@ -1,0 +1,17 @@
+name: testing-agent
+version: 0.1.0
+description: Generates & runs deterministic unit tests, manages integration markers, coverage & safety checks.
+inputs:
+  - codebase: src/**
+  - tests: tests/**
+  - coverage: coverage.xml
+outputs:
+  - pytest-report.txt
+  - coverage.xml
+  - flakiness-report.json
+  - safety-report.json
+constraints:
+  - deterministicUnits: true
+  - integrationMarked: true
+policies:
+  - coverageDropMaxPercent: 5
