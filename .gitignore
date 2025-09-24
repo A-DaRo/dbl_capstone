@@ -5,6 +5,7 @@ models/
 dataset/
 .vscode/
 fake_output/
+test_outputs/
 
 # Byte-compiled / optimized / DLL files
 *.pth
