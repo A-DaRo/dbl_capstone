@@ -23,8 +23,11 @@ def fix_random_seeds():
 
 @pytest.fixture
 def device():
-    """Return CPU device for testing."""
-    return torch.device('cpu')
+    """Return appropriate device for testing (GPU if available, CPU otherwise)."""
+    if torch.cuda.is_available():
+        return torch.device('cuda')
+    else:
+        return torch.device('cpu')
 
 
 @pytest.fixture
@@ -84,7 +87,7 @@ def factory_config_dict_mtl():
         'run_name': 'test_mtl',
         'output_dir': 'tests/outputs/test_mtl',
         'seed': 42,
-        'device': 'cpu',
+        'device': 'auto',
         'data': {
             'dataset_dir': 'tests/dataset/coralscapes',
             'pds_path': 'tests/dataset/processed/pds_patches',
@@ -152,7 +155,7 @@ def factory_config_dict_baseline():
         'run_name': 'test_baseline',
         'output_dir': 'tests/outputs/test_baseline',
         'seed': 42,
-        'device': 'cpu',
+        'device': 'auto',
         'data': {
             'dataset_dir': 'tests/dataset/coralscapes',
             'pds_path': 'tests/dataset/processed/pds_patches',
@@ -225,6 +228,44 @@ def coralscapes_test_data():
 def pds_test_data():
     """Path to test PDS patches dataset."""
     return Path(__file__).parent / "dataset" / "processed" / "pds_patches"
+
+
+# Model fixtures
+@pytest.fixture
+def minimal_coral_mtl_model(splitter_mtl):
+    """Create minimal CoralMTLModel for testing."""
+    from coral_mtl.model.core import CoralMTLModel
+    
+    return CoralMTLModel(
+        encoder_name="nvidia/mit-b0",
+        decoder_channel=64,
+        num_classes={
+            task_name: len(task_info['ungrouped']['id2label'])
+            for task_name, task_info in splitter_mtl.hierarchical_definitions.items()
+        },
+        attention_dim=64
+    )
+
+
+@pytest.fixture
+def minimal_baseline_model(splitter_base):
+    """Create minimal BaselineSegformer for testing."""
+    from coral_mtl.model.core import BaselineSegformer
+    
+    return BaselineSegformer(
+        encoder_name="nvidia/mit-b0",
+        decoder_channel=64,
+        num_classes=len(splitter_base.global_id2label)
+    )
+
+
+@pytest.fixture
+def sample_config_path(tmp_path, factory_config_dict_mtl):
+    """Create temporary config file for testing."""
+    config_file = tmp_path / "test_config.yaml"
+    with open(config_file, 'w') as f:
+        yaml.dump(factory_config_dict_mtl, f)
+    return str(config_file)
 
 
 # Mock fixtures for optional dependencies

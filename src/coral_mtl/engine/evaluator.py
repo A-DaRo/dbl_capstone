@@ -62,8 +62,12 @@ class Evaluator:
             Dict[str, Any]: The final, nested dictionary of computed metrics.
         """
         # --- Step 1: Load Best Model ---
-        print(f"Loading best model checkpoint from: {self.config.checkpoint_path}")
-        self.model.load_state_dict(torch.load(self.config.checkpoint_path, map_location=self.device))
+        if self.config.checkpoint_path is not None:
+            print(f"Loading best model checkpoint from: {self.config.checkpoint_path}")
+            self.model.load_state_dict(torch.load(self.config.checkpoint_path, map_location=self.device))
+        else:
+            print("No checkpoint path provided, using current model weights")
+        
         self.model.to(self.device)
         self.model.eval()
 
@@ -98,9 +102,12 @@ class Evaluator:
                     image_ids = batch['image_id']
 
                     # Perform sliding window inference on each image in the batch
-                    # Note: We need to loop through each image since predict takes single images
+                    # Note: We need to loop through each image since predict takes batched images
                     batch_predictions = {}
                     for idx, single_image in enumerate(batch_images):
+                        # Add batch dimension if needed (single_image shape: [C, H, W] -> [1, C, H, W])
+                        if single_image.dim() == 3:
+                            single_image = single_image.unsqueeze(0)
                         single_predictions = inferrer.predict(single_image)
                         if idx == 0:
                             # Initialize batch_predictions with the right structure

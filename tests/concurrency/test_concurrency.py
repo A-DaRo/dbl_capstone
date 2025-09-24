@@ -20,7 +20,7 @@ class TestAdvancedMetricsProcessorConcurrency:
         try:
             processor = AdvancedMetricsProcessor(
                 output_dir=str(temp_output_dir),
-                num_workers=2,
+                num_cpu_workers=2,
                 enabled_tasks=['ASSD']
             )
             
@@ -52,7 +52,7 @@ class TestAdvancedMetricsProcessorConcurrency:
         try:
             processor = AdvancedMetricsProcessor(
                 output_dir=str(temp_output_dir),
-                num_workers=3,
+                num_cpu_workers=3,
                 enabled_tasks=['ASSD', 'HD95']
             )
             processor.start()
@@ -61,16 +61,12 @@ class TestAdvancedMetricsProcessorConcurrency:
             num_jobs = 50
             jobs_dispatched = 0
             
-            def dispatch_job(job_id):
+            def dispatch_image_job(job_id):
                 pred_mask = np.random.randint(0, 3, (16, 16), dtype=np.uint8)
                 target_mask = np.random.randint(0, 3, (16, 16), dtype=np.uint8)
                 
-                processor.dispatch_job(
-                    image_id=f"high_vol_{job_id:03d}",
-                    pred_mask=pred_mask,
-                    target_mask=target_mask,
-                    split="test"
-                )
+                processor.dispatch_image_job(
+                    f"high_vol_{job_id:03d}", pred_mask, target_mask)
                 return job_id
             
             # Use thread pool to dispatch jobs concurrently
@@ -99,7 +95,7 @@ class TestAdvancedMetricsProcessorConcurrency:
         try:
             processor = AdvancedMetricsProcessor(
                 output_dir=str(temp_output_dir),
-                num_workers=2,
+                num_cpu_workers=2,
                 enabled_tasks=['ASSD']
             )
             processor.start()
@@ -113,12 +109,8 @@ class TestAdvancedMetricsProcessorConcurrency:
                     pred_mask = np.random.randint(0, 2, (12, 12), dtype=np.uint8)
                     target_mask = np.random.randint(0, 2, (12, 12), dtype=np.uint8)
                     
-                    processor.dispatch_job(
-                        image_id=f"{split_name}_{i:03d}",
-                        pred_mask=pred_mask,
-                        target_mask=target_mask,
-                        split=split_name
-                    )
+                    processor.dispatch_image_job(
+                        f"{split_name}_{i:03d}", pred_mask, target_mask)
                     results.append((split_name, i))
                     
                 return results
@@ -152,7 +144,7 @@ class TestAdvancedMetricsProcessorConcurrency:
             try:
                 processor = AdvancedMetricsProcessor(
                     output_dir=str(temp_output_dir / f"workers_{num_workers}"),
-                    num_workers=num_workers,
+                    num_cpu_workers=num_workers,
                     enabled_tasks=['ASSD']
                 )
                 processor.start()
@@ -162,12 +154,8 @@ class TestAdvancedMetricsProcessorConcurrency:
                     pred_mask = np.random.randint(0, 2, (8, 8), dtype=np.uint8)
                     target_mask = np.random.randint(0, 2, (8, 8), dtype=np.uint8)
                     
-                    processor.dispatch_job(
-                        image_id=f"worker_test_{num_workers}_{i}",
-                        pred_mask=pred_mask,
-                        target_mask=target_mask,
-                        split="test"
-                    )
+                    processor.dispatch_image_job(
+                        f"worker_test_{num_workers}_{i}", pred_mask, target_mask)
                 
                 time.sleep(0.1)
                 processor.shutdown()
@@ -182,7 +170,7 @@ class TestAdvancedMetricsProcessorConcurrency:
         try:
             processor = AdvancedMetricsProcessor(
                 output_dir=str(temp_output_dir),
-                num_workers=1,  # Single worker for controlled testing
+                num_cpu_workers=1,  # Single worker for controlled testing
                 enabled_tasks=['ASSD']
             )
             processor.start()
@@ -193,12 +181,8 @@ class TestAdvancedMetricsProcessorConcurrency:
                 pred_mask = np.zeros((4, 4), dtype=np.uint8)
                 target_mask = np.ones((4, 4), dtype=np.uint8)
                 
-                processor.dispatch_job(
-                    image_id=f"pending_{i}",
-                    pred_mask=pred_mask,
-                    target_mask=target_mask,
-                    split="test"
-                )
+                processor.dispatch_image_job(
+                    f"pending_{i}", pred_mask, target_mask)
             
             # Shutdown immediately without waiting
             start_time = time.time()
@@ -218,7 +202,7 @@ class TestAdvancedMetricsProcessorConcurrency:
         try:
             processor = AdvancedMetricsProcessor(
                 output_dir=str(temp_output_dir),
-                num_workers=2,
+                num_cpu_workers=2,
                 enabled_tasks=['ASSD']
             )
             
@@ -232,12 +216,8 @@ class TestAdvancedMetricsProcessorConcurrency:
                     pred_mask = np.random.randint(0, 2, (6, 6), dtype=np.uint8)
                     target_mask = np.random.randint(0, 2, (6, 6), dtype=np.uint8)
                     
-                    processor.dispatch_job(
-                        image_id=f"cycle_{cycle}_job_{i}",
-                        pred_mask=pred_mask,
-                        target_mask=target_mask,
-                        split="test"
-                    )
+                    processor.dispatch_image_job(
+                        f"cycle_{cycle}_job_{i}", pred_mask, target_mask)
                 
                 # Brief processing time
                 time.sleep(0.05)
@@ -261,7 +241,7 @@ class TestAdvancedMetricsProcessorConcurrency:
             
             processor = AdvancedMetricsProcessor(
                 output_dir=str(temp_output_dir),
-                num_workers=2,
+                num_cpu_workers=2,
                 enabled_tasks=['ASSD']
             )
             processor.start()
@@ -277,12 +257,8 @@ class TestAdvancedMetricsProcessorConcurrency:
                 pred_mask = np.random.randint(0, 3, (32, 32), dtype=np.uint8)
                 target_mask = np.random.randint(0, 3, (32, 32), dtype=np.uint8)
                 
-                processor.dispatch_job(
-                    image_id=f"memory_test_{i:03d}",
-                    pred_mask=pred_mask,
-                    target_mask=target_mask,
-                    split="test"
-                )
+                processor.dispatch_image_job(
+                    f"memory_test_{i:03d}", pred_mask, target_mask)
             
             # Check memory after dispatching
             peak_memory = process.memory_info().rss
@@ -314,7 +290,7 @@ class TestAdvancedMetricsProcessorConcurrency:
             enabled_tasks = ['ASSD']
             processor = AdvancedMetricsProcessor(
                 output_dir=str(temp_output_dir),
-                num_workers=2,
+                num_cpu_workers=2,
                 enabled_tasks=enabled_tasks
             )
             processor.start()
@@ -328,12 +304,8 @@ class TestAdvancedMetricsProcessorConcurrency:
                     pred_mask = np.random.randint(0, 2, (10, 10), dtype=np.uint8)
                     target_mask = np.random.randint(0, 2, (10, 10), dtype=np.uint8)
                     
-                    processor.dispatch_job(
-                        image_id=f"filter_test_{batch_id}_{i}",
-                        pred_mask=pred_mask,
-                        target_mask=target_mask,
-                        split="test"
-                    )
+                    processor.dispatch_image_job(
+                        f"filter_test_{batch_id}_{i}", pred_mask, target_mask)
             
             with ThreadPoolExecutor(max_workers=3) as executor:
                 futures = [executor.submit(dispatch_batch, batch_id) for batch_id in range(4)]
@@ -354,7 +326,7 @@ class TestAdvancedMetricsProcessorConcurrency:
             # This might error or fall back to synchronous processing
             processor = AdvancedMetricsProcessor(
                 output_dir=str(temp_output_dir),
-                num_workers=0,
+                num_cpu_workers=0,
                 enabled_tasks=['ASSD']
             )
             
@@ -366,12 +338,8 @@ class TestAdvancedMetricsProcessorConcurrency:
                 pred_mask = np.ones((4, 4), dtype=np.uint8)
                 target_mask = np.zeros((4, 4), dtype=np.uint8)
                 
-                processor.dispatch_job(
-                    image_id="zero_workers_test",
-                    pred_mask=pred_mask,
-                    target_mask=target_mask,
-                    split="test"
-                )
+                processor.dispatch_image_job(
+                    "zero_workers_test", pred_mask, target_mask)
                 
                 processor.shutdown()
                 

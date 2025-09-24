@@ -31,6 +31,10 @@ class AbstractCoralscapesDataset(Dataset, ABC):
                  data_root_path: Optional[str] = None,
                  pds_train_path: Optional[str] = None):
         
+        # Validate patch_size
+        if patch_size <= 0:
+            raise ValueError(f"patch_size must be positive, got {patch_size}")
+        
         self.split = split
         self.augmentations = augmentations
         self.patch_size = patch_size

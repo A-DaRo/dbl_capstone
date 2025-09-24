@@ -11,11 +11,14 @@ title: Repository Copilot Instructions
 
 ## Coral-MTL Project – AI Coding Agent Guide
 
-Purpose: Enable immediate productive assistance on this hierarchical multi‑task coral segmentation project. Focus on concrete, existing patterns—avoid inventing new abstractions unless extending a documented seam.
+Purpose: Enable immediate productive assistance on this hierarchical multi‑task coral segmentation project for coral reef health assessment. Focus on concrete, existing patterns—avoid inventing new abstractions unless extending a documented seam.
+
+**Project Context**: Multi-task learning for coral reef segmentation with hierarchical label structure (genus/health as primary tasks, fish/human_artifacts/substrate as auxiliary). Uses SegFormer backbones with custom MTL decoders and sophisticated metrics including boundary IoU, calibration metrics, and advanced per-image measurements.
 
 See also:
-- `docs/AGENTS_SPEC.md` (agent contracts)
+- `docs/AGENTS_SPEC.md` (agent contracts & multi-agent orchestration)
 - `docs/AGENT_CHAINING.md` (practical multi-agent conversation & CLI chaining guide)
+- `project_specification/*.md` (technical requirements & architecture documentation)
 
 ### 1. Mental Model / Architecture
 - Central orchestrator: `ExperimentFactory` (dependency injection + lazy caching). Always prefer calling its getters (`get_model()`, `get_dataloaders()`, etc.) instead of re‑instantiating components.
@@ -34,11 +37,13 @@ See also:
 - Loss selection:
 	- MTL: `CoralMTLLoss` (CompositeHierarchical) → returns dict of component losses + overall; includes uncertainty weighting + consistency.
 	- Baseline: `CoralLoss` (HybridLoss) or default CE fallback.
+- Task hierarchy: Primary tasks (genus, health) drive model selection metrics. Auxiliary tasks (fish, human_artifacts, substrate) computed but don't affect optimization. Never hardcode task lists—always source from `task_definitions.yaml`.
 - Optimizer pattern: only `AdamWPolyDecay` via `create_optimizer_and_scheduler`; warmup steps derived as `int(total_steps * warmup_ratio)`.
 - Augmentation: `SegmentationAugmentation` (train only). For non‑train splits pass `augmentations=None`.
 - Device selection: `trainer.device == 'auto'` → resolved inside factory; don’t duplicate logic.
 - Model class counts are derived dynamically from splitter (`hierarchical_definitions['<task>']['ungrouped']['id2label']`). Changes to task definitions propagate automatically if you follow this pattern.
 - Advanced metrics must be explicitly enabled under `metrics_processor.enabled: true`; otherwise code should gracefully treat processor as `None`.
+- Project setup: Install as editable package `pip install -e .` from project root for proper imports. Use `src/` layout with namespace packages under `coral_mtl/`.
 
 ### 3. Extension Seams (safe places to add code)
 - New model type: add class under `src/coral_mtl/model/`, then extend `ExperimentFactory.get_model()` switch.
@@ -94,8 +99,27 @@ See also:
 - Avoid large monolithic functions; mirror existing modular segmentation of responsibilities.
 - Preserve backward compatibility of public factory method signatures.
 
-### 10. Ask If Unsure
-If a change touches: task splitting semantics, metrics accumulator layouts, or training loop control flow—surface for review (they have cascading effects on evaluation reproducibility).
+### 10. Development Workflows & Scripts
+- **PDS Dataset Creation**: Use `pds_launcher/pds_simple_script.py` for Poisson Disk Sampling dataset generation. Config in `pds_launcher/pds_config.py`.
+- **Training**: `ExperimentFactory(config_path).run_training()` or direct script execution. All configs in `configs/` directory.
+- **Evaluation**: Use factory's `run_evaluation(checkpoint_path)` method; outputs to `experiments/{run_name}/evaluation/`.
+- **Multi-Agent Orchestration**: `scripts/agent_orchestrator.py` chains reformatter → refactorer → testing workflows. See `copilot-agents/agent-manifests/` for agent contracts.
+
+### 11. Testing Strategy & Markers
+- Fixtures use real task definitions from `tests/configs/tasks/task_definitions.yaml` (not hardcoded).
+- Test markers: `@pytest.mark.gpu`, `@pytest.mark.integration`, `@pytest.mark.optdeps`, `@pytest.mark.slow`.
+- Run subset: `pytest -m "not integration"` (unit only), `pytest -m "integration"` (slower tests).
+- Coverage: Use `coverage run -m pytest` then `coverage report -m` for detailed line coverage.
+- Random seeds fixed in `tests/conftest.py` for reproducible testing.
+
+### 12. Multi-Agent Architecture
+- **Agent Roles**: MD Reformatter, Code Refactorer (3-phase: plan→confirm→execute), Testing Agent, Orchestrator.
+- **Validation Chain**: All agents produce JSON manifests; validate with `scripts/validate_*.py` scripts.
+- **Refactoring Gate**: Phase 1 analysis → mandatory human confirmation → Phase 2 execution → Phase 3 validation.
+- **Safety**: Dual import resolution prevents broken dependencies; all structural changes require explicit confirmation.
+
+### 13. Ask If Unsure
+If a change touches: task splitting semantics, metrics accumulator layouts, training loop control flow, or multi-agent orchestration contracts—surface for review (they have cascading effects on evaluation reproducibility and agent behavior).
 
 ---
 Feedback welcome: highlight unclear sections or missing edge cases to refine these instructions.
