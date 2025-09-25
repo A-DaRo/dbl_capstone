@@ -102,8 +102,10 @@ class Trainer:
         
         inferrer = SlidingWindowInferrer(
             model=self.model,
-            patch_size=self.config.patch_size,
-            stride=self.config.inference_stride,
+            patch_size_h=self.config.patch_size[0],
+            patch_size_w=self.config.patch_size[1],
+            stride_h=self.config.inference_stride[0],
+            stride_w=self.config.inference_stride[1],
             device=self.device,
             batch_size=self.config.inference_batch_size
         )

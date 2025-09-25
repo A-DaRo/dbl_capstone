@@ -1,39 +1,81 @@
+import warnings
+from typing import List, Optional
+
+import segmentation_models_pytorch as smp
 import torch
 import torch.nn as nn
-from typing import List
-from transformers import SegformerModel
+
+
+def _normalize_encoder_name(name: str) -> str:
+    """Convert backbone identifiers to segmentation-models-pytorch compatible names."""
+    if name.startswith("nvidia/"):
+        name = name.split("/", 1)[1]
+    return name.replace("-", "_")
 
 class SegFormerEncoder(nn.Module):
     """
-    A wrapper for the Hugging Face SegformerModel to act as an encoder backbone.
+    An encoder wrapper using the segmentation-models-pytorch library.
 
-    This class loads a pre-trained Mix Transformer (MiT) model and provides a simple
+    This class loads a pre-trained encoder from smp and provides a simple
     interface to extract multi-scale feature maps from an input image.
     """
-    def __init__(self, pretrained_weights_path: str = "nvidia/mit-b2"):
+    def __init__(
+        self,
+        name: str = "mit_b2",
+        weights: Optional[str] = "imagenet",
+        depth: int = 5,
+    ):
         """
-        Initializes the SegFormerEncoder.
+        Initializes the smp.Encoder.
 
         Args:
-            pretrained_weights_path (str): The path to the pre-trained model.
-                - Can be a model ID from the Hugging Face Hub (e.g., "nvidia/mit-b2").
-                - Can be a path to a local directory containing the model's `config.json`
-                  and `pytorch_model.bin` files.
+            name (str): The name of the encoder architecture (e.g., "mit_b2", "resnet34").
+            pretrained (str): The dataset for pre-trained weights (e.g., "imagenet").
+            depth (int): The number of stages to use in the encoder.
         """
         super().__init__()
-        
-        # Load the pre-trained SegFormer model.
-        self.encoder = SegformerModel.from_pretrained(pretrained_weights_path)
-        
-        # Extract the hidden sizes (channel dimensions) from each stage of the encoder.
-        self.hidden_sizes: List[int] = self.encoder.config.hidden_sizes
-        
+
+        normalized_name = _normalize_encoder_name(name)
+        self.original_name = name
+        self.normalized_name = normalized_name
+
+        try:
+            self.encoder = smp.encoders.get_encoder(
+                name=normalized_name,
+                in_channels=3,
+                depth=depth,
+                weights=weights,
+            )
+        except (RuntimeError, ValueError) as exc:
+            if weights is None:
+                raise
+            warnings.warn(
+                f"Failed to load pretrained weights '{weights}' for encoder '{name}': {exc}. "
+                "Falling back to randomly initialised weights.",
+                RuntimeWarning,
+            )
+            self.encoder = smp.encoders.get_encoder(
+                name=normalized_name,
+                in_channels=3,
+                depth=depth,
+                weights=None,
+            )
+        # The first channel is the input, and the last is for the final classification layer, which we don't use.
+        # The decoder expects features from 4 stages.
+        self._out_channels = self.encoder.out_channels
+        self._decoder_out_channels = self._out_channels[-4:]
+
     @property
     def channels(self) -> List[int]:
         """
         Provides the number of output channels for each feature map from the encoder.
         """
-        return self.hidden_sizes
+        return self._out_channels
+
+    @property
+    def decoder_channels(self) -> List[int]:
+        """Channels corresponding to the four feature maps consumed by decoders."""
+        return self._decoder_out_channels
 
     def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
         """
@@ -43,9 +85,7 @@ class SegFormerEncoder(nn.Module):
             x (torch.Tensor): The input image tensor of shape (B, 3, H, W).
 
         Returns:
-            List[torch.Tensor]: A list of 4 feature maps from the encoder's stages.
+            List[torch.Tensor]: A list of feature maps from the encoder's stages.
         """
-        encoder_outputs = self.encoder(x, output_hidden_states=True)
-        hidden_states = encoder_outputs.hidden_states
-        
-        return list(hidden_states)
+        features = self.encoder(x)
+        return features

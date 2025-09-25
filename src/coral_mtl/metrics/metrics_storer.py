@@ -285,6 +285,7 @@ class AsyncMetricsStorer:
                 # Wait for storage tasks with timeout to check shutdown periodically
                 task = self._storage_queue.get(timeout=1.0)
                 if task is None:  # Shutdown signal
+                    self._storage_queue.task_done()
                     break
                 
                 # Process the storage task
@@ -501,15 +502,17 @@ class AsyncMetricsStorer:
     def shutdown(self):
         """Shutdown the async storer and wait for all tasks to complete."""
         if self._worker_thread and self._worker_thread.is_alive():
-            # Signal shutdown and wait for queue to empty
-            self._storage_queue.put(None)  # Shutdown signal
+            if self._active_files:
+                self._storage_queue.put({'type': 'close_files'})
+            self._storage_queue.put(None)
+            self._storage_queue.join()
             self._shutdown_event.set()
-            
-            # Wait for remaining tasks to complete with timeout
+
             try:
                 self._worker_thread.join(timeout=5.0)
-            except:
-                pass
+            finally:
+                self._worker_thread = None
+            self._active_files.clear()
     
     def wait_for_completion(self):
         """Wait for all pending storage operations to complete."""
@@ -517,74 +520,57 @@ class AsyncMetricsStorer:
             self._storage_queue.join()
 
 
-def run_metric_gauntlet(job_queue: multiprocessing.Queue, results_queue: multiprocessing.Queue, 
-                       shutdown_event: EventType):
-    """
-    Worker function for CPU processes to compute Tier 2 metrics.
-    This runs the comprehensive "metric gauntlet" on per-image data.
-    """
-    try:
-        # Import heavy libraries only in worker processes
-        import SimpleITK as sitk
-        from sklearn.metrics import adjusted_rand_score
-        from scipy.ndimage import distance_transform_edt
-        from skimage.measure import label
-        
-    except ImportError as e:
-        print(f"Warning: Advanced metrics libraries not available: {e}")
-        # Create dummy implementations
-        def adjusted_rand_score(*args, **kwargs): return 0.0
-        def distance_transform_edt(*args, **kwargs): return np.zeros_like(args[0])
-        def label(mask): return mask, int(mask.max()) + 1
-    
-    while not shutdown_event.is_set():
+def run_metric_gauntlet(job_queue: multiprocessing.JoinableQueue,
+                       results_queue: multiprocessing.Queue,
+                       enabled_tasks: List[str]):
+    """Worker process entry point for computing advanced metrics."""
+
+    enabled = set(enabled_tasks)
+
+    while True:
         try:
-            # Get job with timeout
-            job = job_queue.get(timeout=1.0)
-            if job is None:  # Shutdown signal
-                break
-                
-            image_id, pred_mask, target_mask = job
-            
-            # Execute the comprehensive metric gauntlet
-            metrics_result = {
-                'image_id': image_id,
-                'timestamp': time.time()
-            }
-            
-            # 1. Surface Distance Metrics (ASSD, HD95)
-            try:
-                surface_distances = compute_surface_distances(pred_mask, target_mask)
-                metrics_result['ASSD'] = surface_distances['mean']
-                metrics_result['HD95'] = surface_distances['hd95']
-            except Exception as e:
-                metrics_result['ASSD'] = 0.0
-                metrics_result['HD95'] = 0.0
-            
-            # 2. Clustering Metrics (ARI, VI)
-            try:
-                clustering_metrics = compute_clustering_metrics(pred_mask, target_mask)
-                metrics_result.update(clustering_metrics)
-            except Exception as e:
-                metrics_result['ARI'] = 0.0
-                metrics_result['VI'] = 0.0
-            
-            # 3. Instance/Panoptic Metrics (placeholder for PQ, AP)
-            try:
-                panoptic_stats = compute_panoptic_stats(pred_mask, target_mask)
-                metrics_result.update(panoptic_stats)
-            except Exception as e:
-                metrics_result['PQ_stats'] = {'tp': 0, 'fp': 0, 'fn': 0, 'iou_sum': 0.0}
-            
-            # Submit results
-            results_queue.put(metrics_result)
-            job_queue.task_done()
-            
+            job = job_queue.get(timeout=0.5)
         except queue.Empty:
             continue
-        except Exception as e:
-            print(f"Worker error processing job: {e}")
-            continue
+
+        if job is None:
+            job_queue.task_done()
+            break
+
+        image_id, pred_mask, target_mask = job
+        pred_mask = np.asarray(pred_mask, dtype=np.uint8)
+        target_mask = np.asarray(target_mask, dtype=np.uint8)
+
+        metrics_result = {
+            "image_id": image_id,
+            "timestamp": time.time()
+        }
+
+        try:
+            if {"ASSD", "HD95"} & enabled:
+                distances = compute_surface_distances(pred_mask, target_mask)
+                if "ASSD" in enabled:
+                    metrics_result["ASSD"] = distances["mean"]
+                if "HD95" in enabled:
+                    metrics_result["HD95"] = distances["hd95"]
+
+            if {"ARI", "VI"} & enabled:
+                clustering = compute_clustering_metrics(pred_mask, target_mask)
+                if "ARI" in enabled:
+                    metrics_result["ARI"] = clustering.get("ARI", 0.0)
+                if "VI" in enabled:
+                    metrics_result["VI"] = clustering.get("VI", 0.0)
+
+            if "PanopticQuality" in enabled:
+                metrics_result["PanopticQuality"] = compute_panoptic_quality(pred_mask, target_mask)
+
+        except Exception as exc:
+            # Defensive: never let a worker crash; missing metrics default to zero.
+            for task in enabled:
+                metrics_result.setdefault(task, 0.0)
+
+        results_queue.put(metrics_result)
+        job_queue.task_done()
 
 def compute_surface_distances(pred_mask: np.ndarray, target_mask: np.ndarray) -> Dict[str, float]:
     """Compute Average Symmetric Surface Distance and 95th percentile Hausdorff Distance."""
@@ -652,25 +638,22 @@ def compute_clustering_metrics(pred_mask: np.ndarray, target_mask: np.ndarray) -
     except Exception:
         return {'ARI': 0.0, 'VI': 0.0}
 
-def compute_panoptic_stats(pred_mask: np.ndarray, target_mask: np.ndarray) -> Dict[str, Any]:
-    """Compute statistics for Panoptic Quality (to be aggregated later)."""
+def compute_panoptic_quality(pred_mask: np.ndarray, target_mask: np.ndarray) -> Dict[str, Any]:
+    """Compute a lightweight panoptic quality summary."""
     try:
-        # Generate instances for "thing" classes (classes > background)
-        thing_classes = np.unique(pred_mask)[1:]  # Exclude background
-        
-        tp, fp, fn, iou_sum = 0, 0, 0, 0.0
-        
+        thing_classes = np.unique(pred_mask)[1:]
+        tp = fp = fn = 0
+        iou_sum = 0.0
+
         for class_id in thing_classes:
-            pred_class = (pred_mask == class_id)
-            target_class = (target_mask == class_id)
-            
-            if np.any(pred_class) and np.any(target_class):
-                # Compute IoU
-                intersection = np.sum(pred_class & target_class)
-                union = np.sum(pred_class | target_class)
+            pred_class = pred_mask == class_id
+            tgt_class = target_mask == class_id
+
+            if np.any(pred_class) and np.any(tgt_class):
+                intersection = float(np.sum(pred_class & tgt_class))
+                union = float(np.sum(pred_class | tgt_class))
                 iou = intersection / union if union > 0 else 0.0
-                
-                if iou > 0.5:  # IoU threshold for matching
+                if iou > 0.5:
                     tp += 1
                     iou_sum += iou
                 else:
@@ -678,20 +661,21 @@ def compute_panoptic_stats(pred_mask: np.ndarray, target_mask: np.ndarray) -> Di
                     fn += 1
             elif np.any(pred_class):
                 fp += 1
-            elif np.any(target_class):
+            elif np.any(tgt_class):
                 fn += 1
-        
+
+        denom = tp + 0.5 * fp + 0.5 * fn
+        pq_value = iou_sum / denom if denom > 0 else 0.0
+
         return {
-            'PQ_stats': {
-                'tp': tp,
-                'fp': fp, 
-                'fn': fn,
-                'iou_sum': iou_sum
-            }
+            "pq": pq_value,
+            "tp": tp,
+            "fp": fp,
+            "fn": fn,
+            "iou_sum": iou_sum
         }
-        
     except Exception:
-        return {'PQ_stats': {'tp': 0, 'fp': 0, 'fn': 0, 'iou_sum': 0.0}}
+        return {"pq": 0.0, "tp": 0, "fp": 0, "fn": 0, "iou_sum": 0.0}
     
 
 
@@ -701,56 +685,53 @@ class AdvancedMetricsProcessor:
     Manages job queues, CPU worker pool, and dedicated I/O writer process.
     """
     
-    def __init__(self, output_dir: str, num_cpu_workers: int = 30, 
+    def __init__(self, output_dir: str, num_cpu_workers: int = 30,
                  enabled_tasks: List[str] = None):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        
-        self.num_cpu_workers = num_cpu_workers
+
+        self.num_cpu_workers = max(1, min(int(num_cpu_workers), 8))
         self.enabled_tasks = enabled_tasks or ["ASSD", "HD95", "PanopticQuality", "ARI"]
-        
-        # Multiprocessing components
-        self.manager: Optional[SyncManager] = None
-        self.job_queue: Optional[multiprocessing.Queue] = None
+        self._enabled_task_set = list(dict.fromkeys(self.enabled_tasks))
+
+        self.job_queue: Optional[multiprocessing.JoinableQueue] = None
         self.results_queue: Optional[multiprocessing.Queue] = None
-        self.worker_pool: Optional[List[multiprocessing.Process]] = None
+        self.worker_pool: List[multiprocessing.Process] = []
         self.io_writer_process: Optional[multiprocessing.Process] = None
         self.shutdown_event: Optional[EventType] = None
-        
+
         self._active = False
-    
+
     def start(self):
-        """Initialize and start the worker pool and I/O process."""
+        """Initialize queues, workers, and the writer process."""
         if self._active:
             return
-            
+
         print(f"Starting AdvancedMetricsProcessor with {self.num_cpu_workers} workers")
-        
-        # Create multiprocessing manager and queues
-        self.manager = multiprocessing.Manager()
-        self.job_queue = self.manager.Queue()
-        self.results_queue = self.manager.Queue()
+
+        self.job_queue = multiprocessing.JoinableQueue()
+        self.results_queue = multiprocessing.Queue()
         self.shutdown_event = multiprocessing.Event()
-        
-        # Start CPU worker pool
+
         self.worker_pool = []
-        for i in range(self.num_cpu_workers):
+        for idx in range(self.num_cpu_workers):
             worker = multiprocessing.Process(
                 target=run_metric_gauntlet,
-                args=(self.job_queue, self.results_queue, self.shutdown_event),
-                name=f"MetricsWorker-{i}"
+                args=(self.job_queue, self.results_queue, self._enabled_task_set),
+                name=f"MetricsWorker-{idx}"
             )
+            worker.daemon = False
             worker.start()
             self.worker_pool.append(worker)
-        
-        # Start dedicated I/O writer process
+
         self.io_writer_process = multiprocessing.Process(
             target=self._io_writer_loop,
-            args=(self.results_queue, self.shutdown_event, str(self.output_dir)),
+            args=(self.results_queue, str(self.output_dir), self._enabled_task_set, self.shutdown_event),
             name="MetricsIOWriter"
         )
+        self.io_writer_process.daemon = False
         self.io_writer_process.start()
-        
+
         self._active = True
         print("AdvancedMetricsProcessor started successfully")
     
@@ -760,28 +741,26 @@ class AdvancedMetricsProcessor:
         Dispatch a single image job to the worker pool.
         Non-blocking operation.
         """
-        if not self._active:
+        if not self._active or self.job_queue is None:
             raise RuntimeError("AdvancedMetricsProcessor not started")
-        
-        # Convert tensors to numpy if needed and ensure uint8 format
-        if hasattr(pred_mask_tensor, 'cpu'):
+
+        if hasattr(pred_mask_tensor, "cpu"):
             pred_mask_np = pred_mask_tensor.cpu().numpy().astype(np.uint8)
         else:
-            pred_mask_np = pred_mask_tensor.astype(np.uint8)
-            
-        if hasattr(target_mask_tensor, 'cpu'):
+            pred_mask_np = np.asarray(pred_mask_tensor, dtype=np.uint8)
+
+        if hasattr(target_mask_tensor, "cpu"):
             target_mask_np = target_mask_tensor.cpu().numpy().astype(np.uint8)
         else:
-            target_mask_np = target_mask_tensor.astype(np.uint8)
-        
-        # Package job
+            target_mask_np = np.asarray(target_mask_tensor, dtype=np.uint8)
+
         job = (image_id, pred_mask_np, target_mask_np)
-        
-        # Dispatch to queue (non-blocking)
+
         try:
-            self.job_queue.put(job, block=False)
+            self.job_queue.put(job, block=True, timeout=5.0)
         except queue.Full:
-            print(f"Warning: Job queue full, dropping job for image {image_id}")
+            # As a last resort, block until space is available.
+            self.job_queue.put(job, block=True)
     
     def shutdown(self):
         """Gracefully shutdown all workers and I/O process."""
@@ -789,59 +768,80 @@ class AdvancedMetricsProcessor:
             return
             
         print("Shutting down AdvancedMetricsProcessor...")
-        
-        # Signal shutdown to all workers
-        self.shutdown_event.set()
-        
-        # Send shutdown signals to job queue
-        for _ in range(self.num_cpu_workers):
-            try:
-                self.job_queue.put(None, timeout=1.0)
-            except:
-                pass
-        
-        # Wait for workers to finish with timeout
+
+        # Drain all pending jobs before closing workers.
+        if self.job_queue is not None:
+            self.job_queue.join()
+            for _ in self.worker_pool:
+                self.job_queue.put(None)
+
+        if self.results_queue is not None:
+            self.results_queue.put(None)
+
+        if self.shutdown_event:
+            self.shutdown_event.set()
+
         for worker in self.worker_pool:
             worker.join(timeout=5.0)
             if worker.is_alive():
                 worker.terminate()
                 worker.join()
-        
-        # Wait for I/O writer
+
         if self.io_writer_process:
             self.io_writer_process.join(timeout=5.0)
             if self.io_writer_process.is_alive():
                 self.io_writer_process.terminate()
                 self.io_writer_process.join()
-        
+
+        if self.job_queue is not None:
+            self.job_queue.close()
+            self.job_queue = None
+
+        if self.results_queue is not None:
+            self.results_queue.close()
+            self.results_queue = None
+
+        self.worker_pool = []
+        self.io_writer_process = None
+        self.shutdown_event = None
         self._active = False
         print("AdvancedMetricsProcessor shutdown complete")
     
     @staticmethod
-    def _io_writer_loop(results_queue: multiprocessing.Queue, shutdown_event: EventType, 
-                       output_dir: str):
-        """I/O writer process loop - handles all file writing operations."""
+    def _io_writer_loop(results_queue: multiprocessing.Queue,
+                       output_dir: str,
+                       enabled_tasks: List[str],
+                       shutdown_event: EventType):
+        """Dedicated process that serialises metric results to disk."""
+
         output_file = Path(output_dir) / "advanced_metrics.jsonl"
-        
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        enabled = set(enabled_tasks)
+
         try:
-            with open(output_file, 'w') as f:
-                while not shutdown_event.is_set():
+            with open(output_file, "w", encoding="utf-8") as handle:
+                while True:
                     try:
-                        result = results_queue.get(timeout=1.0)
-                        if result is None:  # Shutdown signal
-                            break
-                            
-                        # Write result as JSON line
-                        f.write(json.dumps(result) + '\n')
-                        f.flush()  # Ensure immediate write
-                        
+                        result = results_queue.get(timeout=0.5)
                     except queue.Empty:
+                        if shutdown_event.is_set():
+                            continue
                         continue
-                    except Exception as e:
-                        print(f"I/O Writer error: {e}")
-                        continue
-                        
-        except Exception as e:
-            print(f"I/O Writer failed to open file: {e}")
-        
-        print("I/O Writer process finished")
+
+                    if result is None:
+                        break
+
+                    payload = {
+                        "image_id": result.get("image_id"),
+                        "timestamp": result.get("timestamp")
+                    }
+
+                    for task in enabled:
+                        if task in result:
+                            payload[task] = result[task]
+
+                    handle.write(json.dumps(payload) + "\n")
+                    handle.flush()
+        finally:
+            shutdown_event.set()
+            print("I/O Writer process finished")

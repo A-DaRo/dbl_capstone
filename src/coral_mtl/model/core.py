@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from .encoder import SegFormerEncoder
 from .decoders import HierarchicalContextAwareDecoder, SegFormerMLPDecoder
@@ -15,10 +15,14 @@ class BaselineSegformer(nn.Module):
     from the Coralscapes dataset. It uses the same MiT encoder as the CoralMTLModel
     but replaces the complex hierarchical decoder with a standard All-MLP decoder head.
     """
-    def __init__(self,
-                 encoder_name: str,
-                 decoder_channel: int,
-                 num_classes: int = 39):
+    def __init__(
+        self,
+    encoder_name: str,
+    decoder_channel: int,
+    num_classes: int = 39,
+    encoder_weights: Optional[str] = "imagenet",
+    encoder_depth: int = 5,
+    ):
         """
         Args:
             encoder_name (str): The Hugging Face ID for the SegFormer backbone (e.g., 'nvidia/mit-b2').
@@ -30,12 +34,16 @@ class BaselineSegformer(nn.Module):
         
         # --- Component 1: Shared Encoder (Spec Section 3.1) ---
         # For a fair comparison, the feature extractor is identical to the MTL model.
-        self.encoder = SegFormerEncoder(pretrained_weights_path=encoder_name)
+        self.encoder = SegFormerEncoder(
+            name=encoder_name,
+            weights=encoder_weights,
+            depth=encoder_depth,
+        )
 
         # --- Component 2: Standard All-MLP Decoder (SegFormer's original design) ---
         # This replaces the custom HierarchicalContextAwareDecoder.
         self.decoder = SegFormerMLPDecoder(
-            encoder_channels=self.encoder.channels,
+            encoder_channels=self.encoder.decoder_channels,
             decoder_channel=decoder_channel
         )
 
@@ -82,7 +90,17 @@ class CoralMTLModel(nn.Module):
     This class encapsulates the SegFormer encoder and the custom hierarchical
     context-aware decoder into a single, cohesive model.
     """
-    def __init__(self, encoder_name: str, decoder_channel: int, num_classes: Dict[str, int], attention_dim: int, primary_tasks: List[str] = ['genus', 'health'], aux_tasks: List[str] = ['fish', 'human_artifacts', 'substrate']):
+    def __init__(
+        self,
+    encoder_name: str,
+    decoder_channel: int,
+    num_classes: Dict[str, int],
+    attention_dim: int,
+    primary_tasks: Optional[List[str]] = None,
+    aux_tasks: Optional[List[str]] = None,
+    encoder_weights: Optional[str] = "imagenet",
+    encoder_depth: int = 5,
+    ):
         """
         Args:
             encoder_name (str): The Hugging Face ID for the SegFormer backbone.
@@ -94,10 +112,19 @@ class CoralMTLModel(nn.Module):
         """
         super().__init__()
         
-        self.encoder = SegFormerEncoder(pretrained_weights_path=encoder_name)
+        self.encoder = SegFormerEncoder(
+            name=encoder_name,
+            weights=encoder_weights,
+            depth=encoder_depth,
+        )
+
+        if primary_tasks is None:
+            primary_tasks = ['genus', 'health']
+        if aux_tasks is None:
+            aux_tasks = ['fish', 'human_artifacts', 'substrate']
         
         self.decoder = HierarchicalContextAwareDecoder(
-            encoder_channels=self.encoder.channels,
+            encoder_channels=self.encoder.decoder_channels,
             decoder_channel=decoder_channel,
             num_classes=num_classes,
             attention_dim=attention_dim,

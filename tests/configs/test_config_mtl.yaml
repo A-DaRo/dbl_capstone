@@ -1,0 +1,208 @@
+# --- factory_config.yaml ---
+# This file contains all relevant configurations for the ExperimentFactory's
+# get_model() method. In a real experiment, you would only have one 'model'
+# section active.
+
+# --------------------------------------------------------------------------
+# Configuration for the advanced, dynamic Multi-Task Learning (MTL) model
+# --------------------------------------------------------------------------
+model:
+  # This explicit flag tells the factory to build the CoralMTLModel.
+  type: "CoralMTL"
+
+  params:
+    # Name of the SegFormer backbone from Hugging Face Hub.
+    backbone: "mit_b0"
+    # Unified channel dimension for all decoder streams.
+    decoder_channel: 256
+    # Dimension for Query, Key, and Value in the cross-attention module.
+    attention_dim: 128
+
+  # These lists define the task names for the primary and auxiliary decoders.
+  # The factory will look up these names in the task_definitions.yaml file
+  # to determine the number of classes for each corresponding decoder head.
+  tasks:
+    primary: ["genus", "health"]
+    auxiliary: ["fish", "human_artifacts", "substrate", "background", "biota"]
+
+# --------------------------------------------------------------------------
+# Configuration for Datasets and DataLoaders
+# --------------------------------------------------------------------------
+data:
+  # The factory will first check if this is a valid local path. If not, it assumes
+  # it's a Hugging Face Hub dataset ID.
+  dataset_name: "./tests/dataset/coralscapes/"
+  
+  # Path to the pre-processed PDS-sampled training patches.
+  # This is prioritized for the 'train' split, as specified in dataset.py.
+  pds_train_path: "./tests/dataset/processed/pds_patches/"
+  
+  # The single source of truth for all class and task information.
+  # Required for MTL models and for non-MTL models being evaluated on MTL tasks.
+  task_definitions_path: "./tests/configs/tasks/task_definitions.yaml"
+  
+  # Parameters for the final DataLoader object.
+  batch_size: 8
+  num_workers: 4
+  
+  # A fundamental parameter shared by datasets and augmentations.
+  patch_size: 512
+
+# --------------------------------------------------------------------------
+# Configuration for the Augmentation Pipeline (for the 'train' split)
+# --------------------------------------------------------------------------
+augmentations:
+  # The scale range for the RandomResizedCrop transform.
+  crop_scale: [0.5, 1.0]
+  # The degree range for random rotations.
+  rotation_degrees: 15
+  # Parameters for the ColorJitter transform.
+  jitter_params:
+    brightness: 0.2
+    contrast: 0.2
+    saturation: 0.2
+    hue: 0.1
+
+# --------------------------------------------------------------------------
+# Configuration for Loss Function
+# --------------------------------------------------------------------------
+loss:
+  # This type corresponds to the CoralMTLLoss class for our main model.
+  type: "CompositeHierarchical"
+
+  params:
+    # Optional weight for the logical consistency penalty term.
+    w_consistency: 0.1
+    # Weight for the primary loss component (Focal/CE) in the hybrid loss.
+    # The Dice loss component will have weight (1 - hybrid_alpha).
+    hybrid_alpha: 0.5
+    # The focusing parameter for the Focal Loss component.
+    focal_gamma: 2.0
+    # The class index to be ignored during loss calculation.
+    ignore_index: 0
+
+# --------------------------------------------------------------------------
+# Configuration for Metrics
+# --------------------------------------------------------------------------
+
+metrics:
+  # The thickness of the band (in pixels) used for BIoU calculation.
+  boundary_thickness: 4
+  
+  # The class index to be ignored during metric calculation.
+  # This should be consistent with the ignore_index in the loss function.
+  ignore_index: 0
+  
+  # Enable asynchronous storage to prevent blocking during per-image storage
+  use_async_storage: true
+
+# --------------------------------------------------------------------------
+# Configuration for the Optimizer and LR Scheduler
+# --------------------------------------------------------------------------
+optimizer:
+  # This type is mapped to the `create_optimizer_and_scheduler` function.
+  type: "AdamWPolyDecay"
+
+  params:
+    lr: 6.0e-5
+    weight_decay: 0.01
+    adam_betas: [0.9, 0.999]
+    # The percentage of total training steps to use for the linear warmup phase.
+    warmup_ratio: 0.1
+    # The power of the polynomial for the learning rate decay.
+    power: 1.0
+
+# --------------------------------------------------------------------------
+# Configuration for the Trainer Engine
+# --------------------------------------------------------------------------
+trainer:
+  # The main device for training. Can be "cuda", "cpu", or "auto".
+  device: "cuda"
+  
+  # Total number of epochs for the training run.
+  epochs: 50
+  
+  # Directory where checkpoints, logs, and other artifacts will be saved.
+  output_dir: "tests/mock_dir/coral_mtl_test"
+  
+  # Number of steps to accumulate gradients before performing an optimizer step.
+  gradient_accumulation_steps: 4
+  
+  # Enable mixed precision training (FP16) for faster training on compatible hardware
+  use_mixed_precision: true
+  
+  # Model selection metric - choose from Tier 1 metrics for fast evaluation
+  # Available Tier 1 metrics:
+  # - global.mIoU, global.BIoU, global.Boundary_F1
+  # - global.NLL, global.Brier_Score, global.ECE
+  # - global.classification_error, global.background_error, global.missed_error
+  # - tasks.{task}.{level}.mIoU, tasks.{task}.{level}.BIoU
+  model_selection_metric: "global.BIoU"
+  
+  # --- Parameters for the SlidingWindowInferrer used during validation ---
+  # The step size for the sliding window. Optimized for 33% overlap (balance of speed/accuracy)
+  inference_stride: 341
+  
+  # The number of patches to process in a single batch during validation inference.
+  # Increased from 16 to 24 for better GPU utilization
+  inference_batch_size: 24
+
+# --------------------------------------------------------------------------
+# Configuration for the Evaluator Engine
+# --------------------------------------------------------------------------
+evaluator:
+  # Optional: Explicitly provide a path to a model checkpoint.
+  # If this is commented out or null, the factory will automatically find
+  # the 'best_model.pth' file inside the trainer.output_dir.
+  checkpoint_path: null
+
+  # Optional: Specify a dedicated directory for evaluation artifacts.
+  # If null, it defaults to a subfolder named 'evaluation' within trainer.output_dir.
+  output_dir: null
+  
+  # Evaluator-specific inference settings (optimized for thorough testing)
+  # Use slightly more conservative settings for final evaluation to ensure accuracy
+  inference_stride: 320  # ~37% overlap for more thorough coverage
+  inference_batch_size: 20  # Slightly smaller batch for stability during testing
+
+# --------------------------------------------------------------------------
+# Tier 2/3 (CPU-based advanced metrics) Configuration
+# --------------------------------------------------------------------------
+metrics_processor:
+  # Master switch to enable/disable the advanced metrics processing
+  enabled: true
+  
+  # Number of CPU worker processes for parallel computation
+  # Recommend: Number of physical CPU cores (e.g., 30+ for high-end systems)
+  num_cpu_workers: 30
+  
+  # List of advanced metrics to compute
+  # Available: ["ASSD", "HD95", "PanopticQuality", "ARI", "VI"]
+  tasks:
+    - "ASSD"           # Average Symmetric Surface Distance
+    - "HD95"           # 95th percentile Hausdorff Distance
+    - "PanopticQuality" # Panoptic Quality (PQ, SQ, RQ)
+    - "ARI"            # Adjusted Rand Index
+    - "VI"             # Variation of Information
+
+# --------------------------------------------------------------------------
+# Three-Tier System Workflow Summary:
+#
+# During Training:
+# 1. Tier 1: GPU computes mIoU, BIoU, ECE, NLL, Brier, TIDE errors for model selection
+# 2. Tier 2: CPU workers compute ASSD, HD95, PQ, ARI, VI in background (if enabled)
+# 3. Tier 3: Dedicated I/O process writes advanced metrics to advanced_metrics.jsonl
+#
+# During Evaluation:
+# 1. Same as training but with store_per_image=True for comprehensive analysis
+# 2. Two output files:
+#    - test_metrics_full_report.json (Tier 1 - fast metrics)
+#    - advanced_metrics.jsonl (Tier 2 - per-image advanced metrics)
+#
+# Benefits:
+# - GPU stays 100% focused on neural network computation
+# - 30+ CPU cores handle complex metrics in parallel
+# - Non-blocking dispatch ensures no training slowdown
+# - Scalable: more CPU cores = faster metric computation
+# - Comprehensive: both real-time and offline analysis metrics
+# --------------------------------------------------------------------------

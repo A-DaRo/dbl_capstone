@@ -98,6 +98,15 @@ class AbstractCoralMetrics(ABC):
         self.ece_bin_accuracies = torch.zeros(num_bins, dtype=torch.float32, device=self.device)
         self.ece_bin_counts = torch.zeros(num_bins, dtype=torch.int64, device=self.device)
 
+    def _safe_lookup(self, mapping_tensor: torch.Tensor, indices: torch.Tensor) -> torch.Tensor:
+        """Safely maps indices through a lookup tensor while preserving ignore_index."""
+        result = torch.full_like(indices, self.ignore_index)
+        valid = indices != self.ignore_index
+        if torch.any(valid):
+            clipped = torch.clamp(indices[valid], min=0, max=mapping_tensor.numel() - 1)
+            result[valid] = mapping_tensor[clipped]
+        return result
+
     @abstractmethod
     def update(self, predictions: Any, original_targets: torch.Tensor, image_ids: List[str], 
               epoch: int, predictions_logits: Any = None, store_per_image: bool = True, 
@@ -253,18 +262,51 @@ class AbstractCoralMetrics(ABC):
             self.total_pixels += torch.sum(valid_pixels)
 
     def _compute_metrics_from_cm(self, cm: np.ndarray, class_names: List[str]) -> Dict[str, Any]:
-        tp = np.diag(cm)
-        fp = cm.sum(axis=0) - tp
-        fn = cm.sum(axis=1) - tp
-        iou = tp / (tp + fp + fn + EPS)
-        precision = tp / (tp + fp + EPS)
-        recall = tp / (tp + fn + EPS)
-        f1_score = 2 * (precision * recall) / (precision + recall + EPS)
+        tp = np.diag(cm).astype(np.float64)
+        fp = (cm.sum(axis=0) - np.diag(cm)).astype(np.float64)
+        fn = (cm.sum(axis=1) - np.diag(cm)).astype(np.float64)
+
+        def _nanmean_safe(values: np.ndarray) -> float:
+            return float(np.nanmean(values)) if not np.all(np.isnan(values)) else 0.0
+
+        denom_iou = tp + fp + fn
+        iou = np.divide(
+            tp,
+            denom_iou,
+            out=np.full(tp.shape, np.nan, dtype=np.float64),
+            where=denom_iou > 0,
+        )
+
+        denom_precision = tp + fp
+        precision = np.divide(
+            tp,
+            denom_precision,
+            out=np.full(tp.shape, np.nan, dtype=np.float64),
+            where=denom_precision > 0,
+        )
+
+        denom_recall = tp + fn
+        recall = np.divide(
+            tp,
+            denom_recall,
+            out=np.full(tp.shape, np.nan, dtype=np.float64),
+            where=denom_recall > 0,
+        )
+
+        sum_pr = precision + recall
+        f1_score = np.divide(
+            2 * (precision * recall),
+            sum_pr,
+            out=np.full(tp.shape, np.nan, dtype=np.float64),
+            where=sum_pr > 0,
+        )
         support = cm.sum(axis=1).astype(int)
         
         task_summary = {
-            'mIoU': np.nanmean(iou), 'mPrecision': np.nanmean(precision),
-            'mRecall': np.nanmean(recall), 'mF1-Score': np.nanmean(f1_score),
+            'mIoU': _nanmean_safe(iou),
+            'mPrecision': _nanmean_safe(precision),
+            'mRecall': _nanmean_safe(recall),
+            'mF1-Score': _nanmean_safe(f1_score),
             'pixel_accuracy': tp.sum() / (cm.sum() + EPS)
         }
         per_class = {name: {'IoU': iou[i], 'Precision': precision[i], 'Recall': recall[i],
@@ -378,6 +420,45 @@ class AbstractCoralMetrics(ABC):
 
 class CoralMTLMetrics(AbstractCoralMetrics):
     """Metrics calculator for Multi-Task Learning models."""
+
+    def __init__(self,
+                 splitter: TaskSplitter,
+                 storer: MetricsStorer,
+                 device: torch.device,
+                 boundary_thickness: int = 2,
+                 ignore_index: int = 255,
+                 use_async_storage: bool = True,
+                 global_reference_task: str | None = None):
+        super().__init__(
+            splitter=splitter,
+            storer=storer,
+            device=device,
+            boundary_thickness=boundary_thickness,
+            ignore_index=ignore_index,
+            use_async_storage=use_async_storage,
+        )
+        if global_reference_task and global_reference_task in self.splitter.hierarchical_definitions:
+            self.global_reference_task = global_reference_task
+        else:
+            preferred = 'genus' if 'genus' in self.splitter.hierarchical_definitions else None
+            self.global_reference_task = preferred or next(iter(self.splitter.hierarchical_definitions.keys()))
+
+        global_mapping_np = np.asarray(self.splitter.global_mapping_array, dtype=np.int64)
+
+        ref_details = self.splitter.hierarchical_definitions[self.global_reference_task]
+        inverse_mapping = ref_details['ungrouped'].get('inverse_mapping_array')
+        if inverse_mapping is None:
+            self._global_reference_inverse = None
+            self._global_reference_to_global = None
+        else:
+            inverse_np = np.asarray(inverse_mapping, dtype=np.int64)
+            self._global_reference_inverse = torch.from_numpy(inverse_np).long()
+            clipped_inverse = np.clip(inverse_np, 0, global_mapping_np.shape[0] - 1)
+            reference_to_global = global_mapping_np[clipped_inverse]
+            self._global_reference_to_global = torch.from_numpy(reference_to_global).long()
+
+        self._global_background_id = int(global_mapping_np[0]) if global_mapping_np.size > 0 else 0
+
     def update(self, predictions: Dict[str, torch.Tensor], original_targets: torch.Tensor, image_ids: List[str], 
               epoch: int, predictions_logits: Dict[str, torch.Tensor] = None, store_per_image: bool = True, 
               is_testing: bool = False):
@@ -392,24 +473,45 @@ class CoralMTLMetrics(AbstractCoralMetrics):
             
         mask = (original_targets != self.ignore_index)
         batch_size = original_targets.shape[0]
-        global_target = self.splitter.global_mapping_torch.to(self.device)[original_targets]
+        global_mapping = self.splitter.global_mapping_torch.to(self.device)
+        global_target = self._safe_lookup(global_mapping, original_targets)
 
-        # Calculate global predictions for BIoU and other metrics
-        pred_fg = torch.zeros_like(original_targets, dtype=torch.long)
-        for p in preds.values():
-            pred_fg |= (p > 0)
-        global_pred = pred_fg * self.splitter.global_mapping_torch.to(self.device)[original_targets]
+        background_global_id = self._global_background_id
+        global_pred = torch.full_like(original_targets, background_global_id, dtype=torch.long, device=self.device)
+
+        reference_preds = preds.get(self.global_reference_task)
+        if reference_preds is not None and self._global_reference_inverse is not None:
+            inv_tensor = self._global_reference_inverse.to(self.device)
+            if inv_tensor.numel() > 0:
+                clamped = torch.clamp(reference_preds.to(self.device), 0, inv_tensor.numel() - 1)
+                original_ids = inv_tensor[clamped]
+                global_pred = self._safe_lookup(global_mapping, original_ids)
+        else:
+            pred_fg = torch.zeros_like(original_targets, dtype=torch.long, device=self.device)
+            for task_pred in preds.values():
+                pred_fg |= (task_pred.to(self.device) > 0)
+            global_pred = pred_fg * self._safe_lookup(global_mapping, original_targets)
+
+        global_logits_for_metrics = None
+        if logits and self.global_reference_task in logits and self._global_reference_to_global is not None:
+            reference_logits = logits[self.global_reference_task]
+            if reference_logits is not None and reference_logits.dim() == 4:
+                reference_logits = reference_logits.to(self.device)
+                b, _, h, w = reference_logits.shape
+                num_global = self.splitter.num_global_classes
+                global_logits = torch.full((b, num_global, h, w), -1e9, device=self.device)
+                ref_to_global = self._global_reference_to_global.to(self.device)
+                global_logits.index_copy_(1, ref_to_global, reference_logits)
+                global_logits_for_metrics = global_logits
+                global_pred = torch.argmax(global_logits_for_metrics, dim=1)
 
         # Tier 1 GPU Updates (Fast aggregation)
         self._update_global_biou_stats_gpu(global_pred, global_target)
         self._update_boundary_stats_gpu(global_pred, global_target)
         
         # Update probabilistic stats if logits are available (for primary task)
-        if logits and len(logits) > 0:
-            # Use the first task's logits as representative for global metrics
-            first_task_logits = next(iter(logits.values()))
-            if first_task_logits is not None:
-                self._update_probabilistic_stats_gpu(first_task_logits, global_target)
+        if global_logits_for_metrics is not None:
+            self._update_probabilistic_stats_gpu(global_logits_for_metrics, global_target)
 
         for i in range(batch_size):
             img_id = image_ids[i]
@@ -419,8 +521,8 @@ class CoralMTLMetrics(AbstractCoralMetrics):
 
             # Update per-task CMs and BIoU stats
             for task, details in self.splitter.hierarchical_definitions.items():
-                mapping = torch.from_numpy(details['ungrouped']['mapping_array']).to(self.device)
-                target_ungrouped = mapping[original_targets[i]]
+                mapping = torch.from_numpy(details['ungrouped']['mapping_array']).to(self.device).long()
+                target_ungrouped = self._safe_lookup(mapping, original_targets[i])
                 pred_ungrouped = preds[task][i]
                 
                 n_cls = len(details['ungrouped']['id2label'])
@@ -440,8 +542,9 @@ class CoralMTLMetrics(AbstractCoralMetrics):
                     task, 'ungrouped'
                 )
                 if details.get('is_grouped'):
-                    grouped_pred = torch.from_numpy(details['ungrouped_to_grouped_map']).to(self.device)[pred_ungrouped]
-                    grouped_target = torch.from_numpy(details['ungrouped_to_grouped_map']).to(self.device)[target_ungrouped]
+                    grouped_map = torch.from_numpy(details['ungrouped_to_grouped_map']).to(self.device).long()
+                    grouped_pred = self._safe_lookup(grouped_map, pred_ungrouped)
+                    grouped_target = self._safe_lookup(grouped_map, target_ungrouped)
                     self._update_biou_stats_gpu(
                         grouped_pred.unsqueeze(0), 
                         grouped_target.unsqueeze(0), 
@@ -449,10 +552,7 @@ class CoralMTLMetrics(AbstractCoralMetrics):
                     )
 
             # Update Global CM
-            pred_fg_img = torch.zeros_like(original_targets[i], dtype=torch.long)
-            for p_task in preds.values():
-                pred_fg_img |= (p_task[i] > 0)
-            global_pred_img = pred_fg_img * self.splitter.global_mapping_torch.to(self.device)[original_targets[i]]
+            global_pred_img = global_pred[i]
 
             n_cls_global = self.splitter.num_global_classes
             global_cm_update = torch.bincount(
@@ -471,8 +571,8 @@ class CoralMTLMetrics(AbstractCoralMetrics):
                 for task, details in self.splitter.hierarchical_definitions.items():
                     num_classes_per_task[task] = len(details['ungrouped']['id2label'])
                     # Get target mask for this task
-                    mapping = torch.from_numpy(details['ungrouped']['mapping_array']).to(self.device)
-                    target_masks_for_biou[task] = mapping[original_targets[i]].cpu().numpy()
+                    mapping = torch.from_numpy(details['ungrouped']['mapping_array']).to(self.device).long()
+                    target_masks_for_biou[task] = self._safe_lookup(mapping, original_targets[i]).cpu().numpy()
                 
                 num_classes_per_task['global'] = self.splitter.num_global_classes
                 target_masks_for_biou['global'] = global_target[i].cpu().numpy()
@@ -502,12 +602,14 @@ class CoralMetrics(AbstractCoralMetrics):
             # Assume predictions are logits for backwards compatibility
             logits = predictions
             flat_preds = torch.argmax(predictions, dim=1)
-            
+
         mask = (original_targets != self.ignore_index)
-        
-        original_preds = self.splitter.flat_to_original_mapping_torch.to(self.device)[flat_preds]
-        global_target = self.splitter.global_mapping_torch.to(self.device)[original_targets]
-        global_pred = self.splitter.global_mapping_torch.to(self.device)[original_preds]
+
+        mapping_flat_to_original = self.splitter.flat_to_original_mapping_torch.to(self.device)
+        original_preds = self._safe_lookup(mapping_flat_to_original, flat_preds)
+        global_mapping = self.splitter.global_mapping_torch.to(self.device)
+        global_target = self._safe_lookup(global_mapping, original_targets)
+        global_pred = self._safe_lookup(global_mapping, original_preds)
         
         # Tier 1 GPU Updates (Fast aggregation)
         self._update_global_biou_stats_gpu(global_pred, global_target)
@@ -526,9 +628,9 @@ class CoralMetrics(AbstractCoralMetrics):
 
             # Update per-task CMs and BIoU stats
             for task, details in self.splitter.hierarchical_definitions.items():
-                mapping = torch.from_numpy(details['ungrouped']['mapping_array']).to(self.device)
-                target_ungrouped = mapping[original_targets[i]]
-                pred_ungrouped = mapping[original_preds[i]]
+                mapping = torch.from_numpy(details['ungrouped']['mapping_array']).to(self.device).long()
+                target_ungrouped = self._safe_lookup(mapping, original_targets[i])
+                pred_ungrouped = self._safe_lookup(mapping, original_preds[i])
                 
                 n_cls = len(details['ungrouped']['id2label'])
                 cm_update = torch.bincount(
@@ -547,8 +649,9 @@ class CoralMetrics(AbstractCoralMetrics):
                     task, 'ungrouped'
                 )
                 if details.get('is_grouped'):
-                    grouped_pred = torch.from_numpy(details['ungrouped_to_grouped_map']).to(self.device)[pred_ungrouped]
-                    grouped_target = torch.from_numpy(details['ungrouped_to_grouped_map']).to(self.device)[target_ungrouped]
+                    grouped_map = torch.from_numpy(details['ungrouped_to_grouped_map']).to(self.device).long()
+                    grouped_pred = self._safe_lookup(grouped_map, pred_ungrouped)
+                    grouped_target = self._safe_lookup(grouped_map, target_ungrouped)
                     self._update_biou_stats_gpu(
                         grouped_pred.unsqueeze(0), 
                         grouped_target.unsqueeze(0), 
@@ -573,8 +676,8 @@ class CoralMetrics(AbstractCoralMetrics):
                 for task, details in self.splitter.hierarchical_definitions.items():
                     num_classes_per_task[task] = len(details['ungrouped']['id2label'])
                     # Get target mask for this task
-                    mapping = torch.from_numpy(details['ungrouped']['mapping_array']).to(self.device)
-                    target_masks_for_biou[task] = mapping[original_targets[i]].cpu().numpy()
+                    mapping = torch.from_numpy(details['ungrouped']['mapping_array']).to(self.device).long()
+                    target_masks_for_biou[task] = self._safe_lookup(mapping, original_targets[i]).cpu().numpy()
                 
                 num_classes_per_task['global'] = self.splitter.num_global_classes
                 target_masks_for_biou['global'] = global_target[i].cpu().numpy()

@@ -31,6 +31,10 @@ class AbstractCoralscapesDataset(Dataset, ABC):
                  data_root_path: Optional[str] = None,
                  pds_train_path: Optional[str] = None):
         
+        # Validate patch_size
+        if patch_size <= 0:
+            raise ValueError(f"patch_size must be positive, got {patch_size}")
+        
         self.split = split
         self.augmentations = augmentations
         self.patch_size = patch_size
@@ -126,7 +130,16 @@ class AbstractCoralscapesDataset(Dataset, ABC):
             if self.hf_split_dataset:
                 example = self.hf_split_dataset[idx]
                 original_image = example['image'].convert("RGB")
-                raw_label_mask = np.array(example.get('label') or example.get('mask'))
+                # Handle mask field - try 'label' first, then 'mask'
+                label_data = example.get('label')
+                if label_data is not None:
+                    raw_label_mask = np.array(label_data)
+                else:
+                    mask_data = example.get('mask')
+                    if mask_data is not None:
+                        raw_label_mask = np.array(mask_data)
+                    else:
+                        raise ValueError(f"No 'label' or 'mask' field found in HuggingFace dataset example at index {idx}")
                 image_id = example.get('id', f"hf_{self.split}_{idx}")
             else:
                 img_path, mask_path = self.file_paths[idx]

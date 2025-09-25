@@ -65,20 +65,24 @@ class TaskSplitter(ABC):
         for task_name, task_info in self.raw_definitions.items():
             ungrouped_id2label = {int(k): v for k, v in task_info['id2label'].items()}
             ungrouped_map = {orig_id: i for i, orig_id in enumerate(sorted(ungrouped_id2label.keys()))}
+            inverse_mapping = np.zeros(len(ungrouped_id2label), dtype=np.int64)
+            for orig_id, new_id in ungrouped_map.items():
+                inverse_mapping[new_id] = orig_id
             
             task_data = {
                 'is_grouped': 'groupby' in task_info,
                 'ungrouped': {
                     'id2label': {i: ungrouped_id2label[orig_id] for orig_id, i in ungrouped_map.items()},
                     'class_names': [ungrouped_id2label[k] for k in sorted(ungrouped_id2label.keys())],
-                    'mapping_array': self._create_mapping_array(ungrouped_map)
+                    'mapping_array': self._create_mapping_array(ungrouped_map),
+                    'inverse_mapping_array': inverse_mapping
                 }
             }
             
             if task_data['is_grouped']:
                 grouped_id2label = {int(k): v for k, v in task_info['groupby']['id2label'].items()}
                 raw_group_map = task_info['groupby']['mapping']
-                
+
                 ungrouped_to_grouped_map = np.zeros(len(ungrouped_id2label), dtype=np.int64)
                 for new_id, old_ids in raw_group_map.items():
                     ids_to_map = [old_ids] if isinstance(old_ids, int) else old_ids
@@ -132,7 +136,7 @@ class TaskSplitter(ABC):
             global_id2label[current_global_id] = original_id2label[original_id]
             mapping_array[original_id] = current_global_id
             current_global_id += 1
-            
+
         return mapping_array, global_id2label
 
 
