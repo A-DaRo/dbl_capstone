@@ -72,10 +72,26 @@ class Evaluator:
         self.model.eval()
 
         # --- Step 2: Initialize Sliding Window Inferrer ---
+        if hasattr(self.config, 'patch_size_h') and hasattr(self.config, 'patch_size_w'):
+            patch_size_h = self.config.patch_size_h
+            patch_size_w = self.config.patch_size_w
+        else:
+            patch_size_h = self.config.patch_size[0]
+            patch_size_w = self.config.patch_size[1]
+
+        if hasattr(self.config, 'inference_stride_h') and hasattr(self.config, 'inference_stride_w'):
+            stride_h = self.config.inference_stride_h
+            stride_w = self.config.inference_stride_w
+        else:
+            stride_h = self.config.inference_stride[0]
+            stride_w = self.config.inference_stride[1]
+
         inferrer = SlidingWindowInferrer(
             model=self.model,
-            patch_size=self.config.patch_size,
-            stride=self.config.inference_stride,
+            patch_size_h=patch_size_h,
+            patch_size_w=patch_size_w,
+            stride_h=stride_h,
+            stride_w=stride_w,
             device=self.device,
             batch_size=self.config.inference_batch_size
         )
@@ -118,7 +134,7 @@ class Evaluator:
                     
                     # Stack predictions for batch processing
                     stitched_predictions_logits = {
-                        task_name: torch.stack(task_logits, dim=0)
+                        task_name: torch.cat(task_logits, dim=0)
                         for task_name, task_logits in batch_predictions.items()
                     }
 
@@ -150,11 +166,12 @@ class Evaluator:
                         
                         # Get prediction masks from logits for Tier 2 processing
                         if isinstance(predictions_for_metrics, dict):
-                            # MTL model - use first task or create global prediction
-                            first_task_logits = next(iter(predictions_for_metrics.values()))
-                            pred_masks = torch.argmax(first_task_logits, dim=1)
+                            # MTL model - use the logits of the first task for argmax
+                            first_task_name = next(iter(predictions_for_metrics.keys()))
+                            # Logits have shape [N, C, H, W], argmax over C dimension
+                            pred_masks = torch.argmax(predictions_for_metrics[first_task_name], dim=1)
                         else:
-                            # Baseline model
+                            # Baseline model - logits have shape [N, C, H, W]
                             pred_masks = torch.argmax(predictions_for_metrics, dim=1)
                         
                         # Dispatch each image in the batch

@@ -17,8 +17,10 @@ class SlidingWindowInferrer:
 
     def __init__(self,
                  model: nn.Module,
-                 patch_size: int,
-                 stride: int,
+                 patch_size_h: int,
+                 patch_size_w: int,
+                 stride_h: int,
+                 stride_w: int,
                  device: Union[str, torch.device],
                  batch_size: int = 1):
         """
@@ -26,14 +28,18 @@ class SlidingWindowInferrer:
 
         Args:
             model (nn.Module): The PyTorch model, already loaded with weights and in eval() mode.
-            patch_size (int): The height and width of the square patches (e.g., 512).
-            stride (int): The step size for the sliding window (e.g., 256 for 50% overlap).
-            device (Union[str, torch.device]): The device to perform inference on (e.g., 'cuda:0').
+            patch_size_h (int): The height of the patches.
+            patch_size_w (int): The width of the patches.
+            stride_h (int): The vertical step size for the sliding window.
+            stride_w (int): The horizontal step size for the sliding window.
+            device (Union[str, torch.device]): The device to perform inference on.
             batch_size (int): The number of patches to process in a single forward pass.
         """
         self.model = model
-        self.patch_size = patch_size
-        self.stride = stride
+        self.patch_size_h = patch_size_h
+        self.patch_size_w = patch_size_w
+        self.stride_h = stride_h
+        self.stride_w = stride_w
         self.device = torch.device(device)
         self.batch_size = batch_size
         self.model.to(self.device)
@@ -101,8 +107,8 @@ class SlidingWindowInferrer:
         """Pads a batch of images to be divisible by the stride."""
         b, c, h, w = images.shape
 
-        pad_h = (self.stride - (h - self.patch_size) % self.stride) % self.stride
-        pad_w = (self.stride - (w - self.patch_size) % self.stride) % self.stride
+        pad_h = (self.stride_h - (h - self.patch_size_h) % self.stride_h) % self.stride_h
+        pad_w = (self.stride_w - (w - self.patch_size_w) % self.stride_w) % self.stride_w
 
         # Use 'reflect' mode to minimize edge artifacts
         padded_images = F.pad(images, (0, pad_w, 0, pad_h), mode='reflect')
@@ -113,19 +119,19 @@ class SlidingWindowInferrer:
         b, c, h_pad, w_pad = padded_images.shape
 
         # Unfold creates views of all patches for each image in the batch
-        patches = padded_images.unfold(2, self.patch_size, self.stride).unfold(3, self.patch_size, self.stride)
-        # patches shape: (B, C, num_patches_h, num_patches_w, patch_size, patch_size)
+        patches = padded_images.unfold(2, self.patch_size_h, self.stride_h).unfold(3, self.patch_size_w, self.stride_w)
+        # patches shape: (B, C, num_patches_h, num_patches_w, patch_size_h, patch_size_w)
 
         # Reshape into a single large batch of patches for the model
         patches = patches.permute(0, 2, 3, 1, 4, 5).contiguous()
-        # (B, num_h, num_w, C, ps, ps)
-        patches = patches.view(-1, c, self.patch_size, self.patch_size)
-        # (B * num_h * num_w, C, ps, ps)
+        # (B, num_h, num_w, C, ps_h, ps_w)
+        patches = patches.view(-1, c, self.patch_size_h, self.patch_size_w)
+        # (B * num_h * num_w, C, ps_h, ps_w)
 
         # Generate corresponding coordinates for stitching (same for all images in batch)
         patch_coords = []
-        for y in range(0, h_pad - self.patch_size + 1, self.stride):
-            for x in range(0, w_pad - self.patch_size + 1, self.stride):
+        for y in range(0, h_pad - self.patch_size_h + 1, self.stride_h):
+            for x in range(0, w_pad - self.patch_size_w + 1, self.stride_w):
                 patch_coords.append((y, x))
 
         return patches, patch_coords
@@ -142,9 +148,9 @@ class SlidingWindowInferrer:
         for task_name, flat_logits in all_patch_logits.items():
             num_classes = flat_logits.shape[1]
             
-            # Reshape logits to (B, num_patches_per_image, C, patch_size, patch_size)
+            # Reshape logits to (B, num_patches_per_image, C, patch_size_h, patch_size_w)
             # and move to GPU for stitching
-            task_logits = flat_logits.view(batch_size, num_patches_per_image, num_classes, self.patch_size, self.patch_size).to(self.device)
+            task_logits = flat_logits.view(batch_size, num_patches_per_image, num_classes, self.patch_size_h, self.patch_size_w).to(self.device)
 
             # Initialize accumulators on the GPU
             logit_accumulator = torch.zeros((batch_size, num_classes, padded_h, padded_w), dtype=torch.float32, device=self.device)
@@ -154,10 +160,10 @@ class SlidingWindowInferrer:
                 patch_logit = task_logits[:, i, :, :, :]
                 
                 # Add logits to the accumulator
-                logit_accumulator[..., y:y+self.patch_size, x:x+self.patch_size] += patch_logit
+                logit_accumulator[..., y:y+self.patch_size_h, x:x+self.patch_size_w] += patch_logit
                 
                 # Increment the count for the overlapping region
-                count_accumulator[..., y:y+self.patch_size, x:x+self.patch_size] += 1
+                count_accumulator[..., y:y+self.patch_size_h, x:x+self.patch_size_w] += 1
             
             # Average the logits where patches overlapped
             epsilon = 1e-8

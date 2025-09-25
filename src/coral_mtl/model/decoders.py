@@ -61,11 +61,15 @@ class SegFormerMLPDecoder(nn.Module):
         Defines the forward pass for the decoder.
 
         Args:
-            features (List[torch.Tensor]): A list of the 4 feature maps from the encoder.
+            features (List[torch.Tensor]): A list of feature maps from the encoder.
+                                           The new smp encoder provides 6, so we take the last 4.
 
         Returns:
             torch.Tensor: The final fused feature map of shape (B, C_decoder, H/4, W/4).
         """
+        # The new smp encoder provides 6 features, the decoder expects the last 4
+        features = features[-4:]
+        
         # The target spatial size is that of the first, largest feature map
         target_size = features[0].shape[-2:]
         
@@ -99,28 +103,35 @@ class HierarchicalContextAwareDecoder(nn.Module):
     """
     Implements the Hierarchical Context-Aware Decoder for Multi-Task Coral Segmentation.
 
-    This decoder takes features from a shared encoder and branches into five streams:
-    - 2 Primary Streams (Genus, Health): Full MLP decoders, enriched via cross-attention.
-    - 3 Auxiliary Streams (Fish, Human-Artifact, Substrate): Lightweight heads.
+    This decoder takes features from a shared encoder and branches into multiple streams.
+    Tasks designated as 'primary' receive full MLP decoders and are enriched via
+    cross-attention. Tasks designated as 'auxiliary' receive lightweight heads.
     """
     def __init__(self,
                  encoder_channels: List[int],
                  decoder_channel: int,
                  num_classes: Dict[str, int],
-                 attention_dim: int = 256,
-                 primary_tasks: List[str] = ['genus', 'health'],
-                 aux_tasks: List[str] = ['fish', 'human_artifacts', 'substrate']):
+                 primary_tasks: List[str],
+                 aux_tasks: List[str],
+                 attention_dim: int = 256):
         """
         Args:
             encoder_channels (List[int]): Channel dimensions from the encoder's stages.
             decoder_channel (int): The unified channel dimension for all streams.
             num_classes (Dict[str, int]): Mapping of task names to their number of classes.
+            primary_tasks (List[str]): List of task names to be treated as primary.
+            aux_tasks (List[str]): List of task names to be treated as auxiliary.
             attention_dim (int): Dimension for the query, key, and value in the attention module.
         """
         super().__init__()
         assert len(encoder_channels) == 4, "Requires features from 4 encoder stages."
+        
+        # --- Robustness Checks for Task Configuration ---
+        all_defined_tasks = set(primary_tasks) | set(aux_tasks)
+        assert not (set(primary_tasks) & set(aux_tasks)), "A task cannot be both primary and auxiliary."
+        for task in all_defined_tasks:
+            assert task in num_classes, f"Task '{task}' is defined in primary/aux_tasks but not in num_classes."
 
-        # Task definitions are now hardcoded in the model architecture for clarity
         self.primary_tasks = primary_tasks
         self.aux_tasks = aux_tasks
         self.tasks = primary_tasks + aux_tasks
@@ -137,46 +148,43 @@ class HierarchicalContextAwareDecoder(nn.Module):
         # Dynamic Decoder Heads - create decoders for all requested tasks
         self.decoders = nn.ModuleDict()
         for task in self.tasks:
-            if task in num_classes:
-                # Use MLP for primary tasks, Conv2d for auxiliary tasks
-                if task in primary_tasks:
-                    self.decoders[task] = MLP(fused_channels, decoder_channel)
-                else:
-                    self.decoders[task] = nn.Conv2d(fused_channels, decoder_channel, kernel_size=1)
+            # Use full MLP for primary tasks, lightweight Conv2d for auxiliary tasks
+            if task in primary_tasks:
+                self.decoders[task] = MLP(fused_channels, decoder_channel)
             else:
-                print(f"Warning: Task '{task}' not found in num_classes. Skipping decoder creation.")
+                self.decoders[task] = nn.Conv2d(fused_channels, decoder_channel, kernel_size=1)
 
         # Projections for Cross-Attention Module
         self.to_qkv = nn.ModuleDict()
         for task in self.tasks:
-            if task in self.decoders:  # Only create attention layers for tasks with decoders
-                self.to_qkv[task] = nn.ModuleList([
-                    nn.Conv2d(decoder_channel, attention_dim, 1, bias=False), # Query
-                    nn.Conv2d(decoder_channel, attention_dim, 1, bias=False), # Key
-                    nn.Conv2d(decoder_channel, attention_dim, 1, bias=False)  # Value
-                ])
+            self.to_qkv[task] = nn.ModuleList([
+                nn.Conv2d(decoder_channel, attention_dim, 1, bias=False), # Query
+                nn.Conv2d(decoder_channel, attention_dim, 1, bias=False), # Key
+                nn.Conv2d(decoder_channel, attention_dim, 1, bias=False)  # Value
+            ])
 
         self.context_pool = nn.AvgPool2d(kernel_size=4, stride=4)
         
-        # Only create attention and gating layers for primary tasks that have decoders
+        # Only create attention and gating layers for primary tasks
         self.attn_proj = nn.ModuleDict()
         self.gating_layers = nn.ModuleDict()
         for task in self.primary_tasks:
-            if task in self.decoders:
-                self.attn_proj[task] = MLP(attention_dim, decoder_channel)
-                self.gating_layers[task] = nn.Sequential(
-                    nn.Conv2d(decoder_channel, 1, kernel_size=1),
-                    nn.Sigmoid()
-                )
+            self.attn_proj[task] = MLP(attention_dim, decoder_channel)
+            self.gating_layers[task] = nn.Sequential(
+                nn.Conv2d(decoder_channel, 1, kernel_size=1),
+                nn.Sigmoid()
+            )
 
         # Final Prediction Layers
         self.predictors = nn.ModuleDict({
             task: nn.Conv2d(decoder_channel, n_cls, kernel_size=1)
-            for task, n_cls in num_classes.items()
+            for task, n_cls in num_classes.items() if task in self.tasks
         })
 
     def _fuse_encoder_features(self, features: List[torch.Tensor]) -> torch.Tensor:
         """Unify channels, upsample, and concatenate encoder features."""
+        # The new smp encoder provides 6 features, the decoder expects the last 4
+        features = features[-4:]
         target_size = features[0].shape[2:]
         processed_features = [
             F.interpolate(linear_c(feature), size=target_size, mode='bilinear', align_corners=False)
@@ -188,31 +196,30 @@ class HierarchicalContextAwareDecoder(nn.Module):
         """Performs attention where a query task attends to context from all other tasks."""
         b, _, h, w = decoded_features[query_task].shape
         
-        # Apply context pooling to query as well to match spatial dimensions
         query_feature = self.context_pool(decoded_features[query_task])
         q = self.to_qkv[query_task][0](query_feature).flatten(2).transpose(1, 2)
 
         context_keys, context_values = [], []
-        # Only iterate over tasks that have decoders and exist in decoded_features
         for task in self.tasks:
-            if task != query_task and task in decoded_features and task in self.to_qkv:
+            if task != query_task:
                 context_feature = self.context_pool(decoded_features[task])
                 k_task = self.to_qkv[task][1](context_feature).flatten(2).transpose(1, 2)
                 v_task = self.to_qkv[task][2](context_feature).flatten(2).transpose(1, 2)
                 context_keys.append(k_task)
                 context_values.append(v_task)
         
-        if not context_keys:  # Handle case where no context tasks are available
-            # Return a zero tensor with the expected shape after pooling
+        if not context_keys:
+            # If there's no context, return a zero tensor that requires a gradient.
+            # This ensures that the computation graph remains connected even in edge cases
+            # (e.g., a model with only one task), allowing gradients to flow.
+            attention_dim = self.to_qkv[query_task][0].out_channels
             pooled_h, pooled_w = h // 4, w // 4
-            attention_dim = q.shape[-1]
-            return torch.zeros(b, attention_dim, pooled_h, pooled_w, device=q.device)
+            return torch.zeros(b, attention_dim, pooled_h, pooled_w, device=q.device, requires_grad=True)
         
         k_context = torch.cat(context_keys, dim=1)
         v_context = torch.cat(context_values, dim=1)
         
         out = F.scaled_dot_product_attention(q, k_context, v_context)
-        # Reshape back to spatial dimensions (but with pooled size)
         pooled_h, pooled_w = h // 4, w // 4
         return out.transpose(1, 2).reshape(b, -1, pooled_h, pooled_w)
 
@@ -221,39 +228,28 @@ class HierarchicalContextAwareDecoder(nn.Module):
         fused_features = self._fuse_encoder_features(features)
         decoded_features = {task: decoder(fused_features) for task, decoder in self.decoders.items()}
 
-        # Only perform cross-attention for primary tasks that have decoders and attention layers
-        enriched_features = {}
-        for task in self.primary_tasks:
-            if task in decoded_features and task in self.attn_proj:
-                enriched_features[task] = self._perform_cross_attention(task, decoded_features)
+        enriched_features = {
+            task: self._perform_cross_attention(task, decoded_features)
+            for task in self.primary_tasks
+        }
 
         logits = {}
         # Process primary tasks with attention
         for task in self.primary_tasks:
-            if task in decoded_features and task in self.predictors:
-                if task in enriched_features and task in self.attn_proj and task in self.gating_layers:
-                    # Use attention for primary tasks
-                    f_original = decoded_features[task]
-                    f_enriched = enriched_features[task]
-                    
-                    # Upsample the enriched features to match original spatial dimensions
-                    original_h, original_w = f_original.shape[2], f_original.shape[3]
-                    if f_enriched.shape[2] != original_h or f_enriched.shape[3] != original_w:
-                        f_enriched = F.interpolate(f_enriched, size=(original_h, original_w), 
-                                                   mode='bilinear', align_corners=False)
-                    
-                    f_projected_enrichment = self.attn_proj[task](f_enriched)
-                    gate = self.gating_layers[task](f_original)
-                    final_feature = (gate * f_original) + ((1 - gate) * f_projected_enrichment)
-                    logits[task] = self.predictors[task](final_feature)
-                else:
-                    # Fallback to direct prediction if attention layers not available
-                    logits[task] = self.predictors[task](decoded_features[task])
+            f_original = decoded_features[task]
+            f_enriched = enriched_features[task]
+            
+            original_h, original_w = f_original.shape[2], f_original.shape[3]
+            f_enriched = F.interpolate(f_enriched, size=(original_h, original_w), mode='bilinear', align_corners=False)
+            
+            f_projected_enrichment = self.attn_proj[task](f_enriched)
+            gate = self.gating_layers[task](f_original)
+            final_feature = (gate * f_original) + ((1 - gate) * f_projected_enrichment)
+            logits[task] = self.predictors[task](final_feature)
 
         # Process auxiliary tasks without attention
         for task in self.aux_tasks:
-            if task in decoded_features and task in self.predictors:
-                logits[task] = self.predictors[task](decoded_features[task])
+            logits[task] = self.predictors[task](decoded_features[task])
 
         target_size = features[0].shape[2:]
         for task, logit in logits.items():

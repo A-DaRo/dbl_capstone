@@ -12,7 +12,7 @@ model:
 
   params:
     # Name of the SegFormer backbone from Hugging Face Hub.
-    backbone: "nvidia/mit-b2"
+    backbone: "mit_b2"
     # Unified channel dimension for all decoder streams.
     decoder_channel: 256
     # Dimension for Query, Key, and Value in the cross-attention module.

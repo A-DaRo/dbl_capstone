@@ -5,7 +5,7 @@ model:
   type: "SegFormerBaseline"
   params:
     # Name of the SegFormer backbone.
-    backbone: "nvidia/mit-b2"
+    backbone: "mit_b2"
     # Unified channel dimension for the standard MLP decoder.
     decoder_channel: 256
     # For a simple baseline, the number of output classes is specified directly.

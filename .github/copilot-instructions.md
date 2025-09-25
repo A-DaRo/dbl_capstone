@@ -1,14 +1,3 @@
----
-description: High-level architectural and coding guidance for AI assistants operating
-  in this repo.
-status: stable
-tags:
-- architecture
-- instructions
-- style
-title: Repository Copilot Instructions
----
-
 ## Coral-MTL Project – AI Coding Agent Guide
 
 Purpose: Enable immediate productive assistance on this hierarchical multi‑task coral segmentation project for coral reef health assessment. Focus on concrete, existing patterns—avoid inventing new abstractions unless extending a documented seam.
@@ -16,8 +5,6 @@ Purpose: Enable immediate productive assistance on this hierarchical multi‑tas
 **Project Context**: Multi-task learning for coral reef segmentation with hierarchical label structure (genus/health as primary tasks, fish/human_artifacts/substrate as auxiliary). Uses SegFormer backbones with custom MTL decoders and sophisticated metrics including boundary IoU, calibration metrics, and advanced per-image measurements.
 
 See also:
-- `docs/AGENTS_SPEC.md` (agent contracts & multi-agent orchestration)
-- `docs/AGENT_CHAINING.md` (practical multi-agent conversation & CLI chaining guide)
 - `project_specification/*.md` (technical requirements & architecture documentation)
 
 ### 1. Mental Model / Architecture
@@ -112,11 +99,6 @@ See also:
 - Coverage: Use `coverage run -m pytest` then `coverage report -m` for detailed line coverage.
 - Random seeds fixed in `tests/conftest.py` for reproducible testing.
 
-### 12. Multi-Agent Architecture
-- **Agent Roles**: MD Reformatter, Code Refactorer (3-phase: plan→confirm→execute), Testing Agent, Orchestrator.
-- **Validation Chain**: All agents produce JSON manifests; validate with `scripts/validate_*.py` scripts.
-- **Refactoring Gate**: Phase 1 analysis → mandatory human confirmation → Phase 2 execution → Phase 3 validation.
-- **Safety**: Dual import resolution prevents broken dependencies; all structural changes require explicit confirmation.
 
 ### 13. Ask If Unsure
 If a change touches: task splitting semantics, metrics accumulator layouts, training loop control flow, or multi-agent orchestration contracts—surface for review (they have cascading effects on evaluation reproducibility and agent behavior).
@@ -124,4 +106,3 @@ If a change touches: task splitting semantics, metrics accumulator layouts, trai
 ---
 Feedback welcome: highlight unclear sections or missing edge cases to refine these instructions.
 
-Reference: Extended agent & pipeline contracts in `docs/AGENTS_SPEC.md`.

@@ -64,6 +64,8 @@ class ExperimentFactory:
         self.loss_fn = None
         self.metrics_calculator = None
         self.metrics_storer = None
+        self.advanced_metrics_processor = None
+        self._optimizer_scheduler = None
 
         # --- Resolve all relative paths in config to absolute paths ---
         self._resolve_config_paths()
@@ -181,15 +183,19 @@ class ExperimentFactory:
                 decoder_channel=params['decoder_channel'],
                 num_classes=num_classes_dict,
                 attention_dim=params['attention_dim'],
-                primary_tasks=model_config.get('tasks', {}).get('primary', []),
-                aux_tasks=model_config.get('tasks', {}).get('auxiliary', [])
+                primary_tasks=model_config.get('tasks', {}).get('primary'),
+                aux_tasks=model_config.get('tasks', {}).get('auxiliary'),
+                encoder_weights=params.get('encoder_weights', 'imagenet'),
+                encoder_depth=params.get('encoder_depth', 5),
             )
         elif model_type == "SegFormerBaseline":
             # For baseline, num_classes is the size of the flattened space
             self.model = BaselineSegformer(
                 encoder_name=params['backbone'],
                 decoder_channel=params['decoder_channel'],
-                num_classes=len(self.task_splitter.flat_id2label)
+                num_classes=len(self.task_splitter.flat_id2label),
+                encoder_weights=params.get('encoder_weights', 'imagenet'),
+                encoder_depth=params.get('encoder_depth', 5),
             )
         return self.model
     
@@ -256,8 +262,8 @@ class ExperimentFactory:
                                    and learning rate scheduler.
         """
         # 1. Check cache first
-        if hasattr(self, 'optimizer') and self.optimizer:
-            return self.optimizer, self.scheduler
+        if self._optimizer_scheduler is not None:
+            return self._optimizer_scheduler
 
         print("--- Building optimizer and scheduler ---")
         optimizer_config = self.config.get('optimizer', {})
@@ -299,7 +305,8 @@ class ExperimentFactory:
         # 5. Cache and return
         self.optimizer = optimizer
         self.scheduler = scheduler
-        return self.optimizer, self.scheduler
+        self._optimizer_scheduler = (self.optimizer, self.scheduler)
+        return self._optimizer_scheduler
 
 
     def get_loss_function(self) -> nn.Module:
@@ -327,6 +334,17 @@ class ExperimentFactory:
             return self.loss_fn
 
         params = loss_config.get('params', {})
+        model_config = self.config.get('model', {})
+        task_config = model_config.get('tasks', {})
+
+        primary_tasks = task_config.get('primary')
+        if primary_tasks is not None:
+            primary_tasks = list(primary_tasks)
+        aux_tasks = task_config.get('auxiliary', []) or []
+        aux_tasks = list(aux_tasks)
+
+        if loss_type == "CompositeHierarchical" and not primary_tasks:
+            raise ValueError("CompositeHierarchical loss requires 'model.tasks.primary' to be defined in the config.")
         
         # 2. Instantiate based on type
         if loss_type == "CompositeHierarchical":
@@ -345,6 +363,8 @@ class ExperimentFactory:
             
             loss_fn = CoralMTLLoss(
                 num_classes=num_classes_dict,
+                primary_tasks=primary_tasks,
+                aux_tasks=aux_tasks,
                 ignore_index=params.get('ignore_index', 0),
                 w_consistency=params.get('w_consistency', 0.1),
                 hybrid_alpha=params.get('hybrid_alpha', 0.5),
