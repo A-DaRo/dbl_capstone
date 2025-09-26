@@ -262,3 +262,114 @@ def test_evaluator_lifecycle_on_error(
     # Crucial assertions: check that cleanup methods were still called
     mock_metrics_storer.close.assert_called_once()
     mock_metrics_processor.shutdown.assert_called_once()
+
+
+def test_evaluator_persists_test_loss_metrics(tmp_path: Path, device):
+    """Evaluator should create test_loss_metrics.json including namespaced test_ keys."""
+    class TinyBaseline(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv = torch.nn.Conv2d(3, 3, 1)
+        def forward(self, x):
+            return {'segmentation': self.conv(x)}
+
+    model = TinyBaseline().to(device)
+    batch = {
+        'image': torch.randn(1,3,32,32, device=device),
+        'original_mask': torch.zeros(1,32,32, dtype=torch.long, device=device),
+        'image_id': ['sample'],
+        'mask': torch.zeros(1,32,32, dtype=torch.long, device=device)
+    }
+    test_loader = [batch]
+
+    # Minimal metrics calculator mock
+    metrics_calc = MagicMock()
+    metrics_calc.reset.return_value = None
+    metrics_calc.update.return_value = None
+    metrics_calc.compute.return_value = {'optimization_metrics': {'H-Mean': 0.42}}
+
+    from coral_mtl.metrics.metrics_storer import MetricsStorer
+    storer = MetricsStorer(str(tmp_path))
+
+    config = SimpleNamespace(
+        device=device.type,
+        output_dir=str(tmp_path),
+        checkpoint_path=None,
+        patch_size=[32,32],
+        inference_stride=[16,16],
+        inference_batch_size=1
+    )
+
+    evaluator = Evaluator(
+        model=model,
+        test_loader=test_loader,
+        metrics_calculator=metrics_calc,
+        metrics_storer=storer,
+        config=config
+    )
+
+    # Inject a simple loss_fn onto evaluator
+    def dummy_loss(preds, target):
+        if isinstance(preds, dict):
+            tensor = preds.get('segmentation')
+        else:
+            tensor = preds
+        return {'total_loss': tensor.abs().mean() + 1.0}
+    evaluator.loss_fn = dummy_loss
+
+    evaluator.evaluate()
+
+    loss_file = Path(tmp_path) / 'test_loss_metrics.json'
+    assert loss_file.exists(), "Expected test_loss_metrics.json to be written"
+    text = loss_file.read_text()
+    assert 'test_total_loss' in text, "Namespaced test_total_loss missing in persisted file"
+
+
+def test_evaluator_skips_loss_when_not_provided(tmp_path: Path, device):
+    class TinyBaseline(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv = torch.nn.Conv2d(3, 3, 1)
+        def forward(self, x):
+            return {'segmentation': self.conv(x)}
+
+    model = TinyBaseline().to(device)
+    batch = {
+        'image': torch.randn(1,3,32,32, device=device),
+        'original_mask': torch.zeros(1,32,32, dtype=torch.long, device=device),
+        'image_id': ['sample'],
+        'mask': torch.zeros(1,32,32, dtype=torch.long, device=device)
+    }
+    test_loader = [batch]
+
+    metrics_calc = MagicMock()
+    metrics_calc.reset.return_value = None
+    metrics_calc.update.return_value = None
+    metrics_calc.compute.return_value = {'optimization_metrics': {}}
+
+    storer = MagicMock()
+
+    config = SimpleNamespace(
+        device=device.type,
+        output_dir=str(tmp_path),
+        checkpoint_path=None,
+        patch_size=[32,32],
+        inference_stride=[16,16],
+        inference_batch_size=1
+    )
+
+    evaluator = Evaluator(
+        model=model,
+        test_loader=test_loader,
+        metrics_calculator=metrics_calc,
+        metrics_storer=storer,
+        config=config,
+        loss_fn=None
+    )
+
+    evaluator.evaluate()
+
+    # Ensure no loss entries were accumulated/persisted when loss_fn is missing
+    for call_kwargs in metrics_calc.update.call_args_list:
+        assert 'predictions' in call_kwargs.kwargs
+    storer.save_test_loss_report.assert_not_called()

@@ -1,8 +1,12 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Tuple
 import segmentation_models_pytorch as smp
+from .loss_weighting import WeightingStrategy
+import math
+
+EPS = 1e-7  # global epsilon for numerical stability
 
 # --- Baseline Loss Function ---
 
@@ -55,7 +59,7 @@ class CoralLoss(nn.Module):
             )
             self.cross_entropy_fallback = self.primary_loss
         
-        # Instantiate Dice loss component
+        # NOTE: we keep smp DiceLoss but wrap with additional epsilon guard in forward
         self.dice_loss = smp.losses.DiceLoss(
             mode='multiclass',
             ignore_index=ignore_index,
@@ -73,7 +77,23 @@ class CoralLoss(nn.Module):
             return torch.tensor(1.0, device=logits.device, requires_grad=True)
             
         loss_primary = self.primary_loss(logits, targets.long())
+        # Dice can return NaN if both prediction & target have no foreground; guard it
         loss_dice = self.dice_loss(logits, targets.long())
+        if torch.isnan(loss_dice):
+            # Re-compute a manual safe dice fallback (very rare)
+            with torch.no_grad():
+                probs = F.softmax(logits, dim=1)
+                targ = targets.long()
+                valid_mask = (targ != self.ignore_index)
+                if valid_mask.any():
+                    one_hot = F.one_hot(torch.clamp(targ, min=0), num_classes=probs.shape[1]).permute(0,3,1,2).float()
+                    one_hot = one_hot * valid_mask.unsqueeze(1)
+                    intersect = (probs * one_hot).sum(dim=(0,2,3))
+                    denom = probs.sum(dim=(0,2,3)) + one_hot.sum(dim=(0,2,3)) + EPS
+                    manual_dice = 1 - (2*intersect / denom).mean()
+                else:
+                    manual_dice = torch.tensor(0.0, device=logits.device)
+            loss_dice = manual_dice.detach().requires_grad_(True)
         
         # Check for NaN in loss components
         if torch.isnan(loss_primary):
@@ -100,39 +120,44 @@ class CoralLoss(nn.Module):
 # --- Main Composite Loss Function ---
 
 class CoralMTLLoss(nn.Module):
-    """
-    Implements the complete multi-task loss for the Coral-MTL project.
-    Uses hierarchical uncertainty weighting to balance primary and auxiliary
-    task groups, and includes an optional logical consistency penalty.
+    """Multi-task loss orchestration delegating weighting to a strategy.
+
+    Responsibilities post-refactor (Phase B):
+      1. Compute raw per-task losses (primary: hybrid, auxiliary: CE).
+      2. Apply optional logical consistency regularizer.
+      3. Delegate aggregation / balancing to injected `WeightingStrategy`.
+      4. Return comprehensive dict of components (unweighted + weighted + aux losses).
     """
     def __init__(self,
                  num_classes: Dict[str, int],
                  primary_tasks: List[str],
                  aux_tasks: List[str],
+                 weighting_strategy: 'WeightingStrategy',
                  class_weights: Optional[Dict[str, torch.Tensor]] = None,
                  ignore_index: int = -100,
                  w_consistency: float = 0.1,
                  hybrid_alpha: float = 0.5,
-                 focal_gamma: float = 2.0):
+                 focal_gamma: float = 2.0,
+                 debug: bool = False):
         super().__init__()
-        
         self.num_classes = num_classes
         self.ignore_index = ignore_index
         self.w_consistency = w_consistency
-        
-        # Store tasks dynamically from constructor arguments
+        self.debug = debug
+        self.weighting_strategy = weighting_strategy
+        self._running_stats = {
+            'steps': 0,
+            'per_task_loss_mean': {},
+            'per_task_loss_m2': {}
+        }
+
         self.primary_tasks = primary_tasks
         self.aux_tasks = aux_tasks
-        
-        # --- Loss components using smp for robustness ---
-        # Primary tasks use the CoralLoss hybrid function
         self.primary_loss_fn = CoralLoss(
             hybrid_alpha=hybrid_alpha,
             focal_gamma=focal_gamma,
             ignore_index=self.ignore_index
         )
-        
-        # Auxiliary tasks use standard weighted Cross-Entropy
         class_weights = class_weights if class_weights is not None else {}
         self.aux_losses = nn.ModuleDict({
             task: nn.CrossEntropyLoss(
@@ -141,55 +166,88 @@ class CoralMTLLoss(nn.Module):
             )
             for task in self.aux_tasks if task in self.num_classes
         })
-        
-        # --- Learnable uncertainty parameters for hierarchical balancing ---
-        # Dynamically create parameters for each primary task
-        self.log_vars_primary = nn.ParameterDict({
-            task: nn.Parameter(torch.tensor(0.0))
-            for task in self.primary_tasks if task in self.num_classes
-        })
-        # Single parameter for the entire auxiliary group
-        self.log_var_aux_group = nn.Parameter(torch.tensor(0.0))
-        
-        print(f"Initialized CoralMTLLoss with Primary Tasks: {self.primary_tasks}, "
-              f"Auxiliary Tasks: {self.aux_tasks}, and ignore_index={ignore_index}")
+        if self.debug:
+            print(f"[CoralMTLLoss] Initialized (Strategy={self.weighting_strategy.__class__.__name__}) | primary={self.primary_tasks} aux={self.aux_tasks} ignore_index={ignore_index}")
 
-    def _consistency_loss(self, genus_logits, health_logits):
-        """Penalizes illogical predictions: P(healthy) > 0.5 AND P(genus=background) > 0.5"""
-        # Add numerical stability checks
+    def _get_dynamic_indices(self) -> Tuple[Optional[int], Optional[int]]:
+        """Placeholder for dynamic index retrieval (Phase A minimal). Returns (genus_bg_idx, health_alive_idx)."""
+        # For now assume same as earlier; will be replaced by task splitter metadata in later phase.
+        return 0, 1
+
+    def _consistency_loss(self, genus_logits: torch.Tensor, health_logits: torch.Tensor) -> torch.Tensor:
+        """Soft differentiable logical violation penalty.
+
+        V = relu( p_health_alive + p_genus_background - 1 ) averaged over spatial domain.
+        This encourages that both probabilities are not simultaneously high.
+        """
         if torch.any(torch.isnan(genus_logits)) or torch.any(torch.isnan(health_logits)):
-            print("Warning: NaN detected in consistency loss inputs")
-            return torch.tensor(0.0, device=genus_logits.device)
-            
-        genus_probs = F.softmax(genus_logits, dim=1)
-        health_probs = F.softmax(health_logits, dim=1)
-        
-        # Check for NaN in probabilities
+            if self.debug:
+                print("[CoralMTLLoss] Consistency: NaN in logits -> skipping")
+            return torch.zeros((), device=genus_logits.device)
+
+        # use log_softmax for stability then exp
+        genus_probs = F.softmax(genus_logits.float(), dim=1)
+        health_probs = F.softmax(health_logits.float(), dim=1)
         if torch.any(torch.isnan(genus_probs)) or torch.any(torch.isnan(health_probs)):
-            print("Warning: NaN detected in softmax probabilities")
-            return torch.tensor(0.0, device=genus_logits.device)
-        
-        # Assuming class index 0 is background/ignored for genus task
-        idx_genus_background = 0
-        # Assuming class index 1 is 'alive/healthy' for health task
-        idx_health_alive = 1 
-        
-        p_genus_background = genus_probs[:, idx_genus_background, :, :]
-        p_health_alive = health_probs[:, idx_health_alive, :, :]
-        
-        illogical_mask = (p_health_alive > 0.5) & (p_genus_background > 0.5)
-        
-        if not illogical_mask.any():
-            return torch.tensor(0.0, device=genus_logits.device)
-            
-        penalty = p_genus_background[illogical_mask].mean()
-        
-        # Final safety check for NaN
+            if self.debug:
+                print("[CoralMTLLoss] Consistency: NaN in probs -> skipping")
+            return torch.zeros((), device=genus_logits.device)
+
+        idx_genus_background, idx_health_alive = self._get_dynamic_indices()
+        if idx_genus_background >= genus_probs.shape[1] or idx_health_alive >= health_probs.shape[1]:
+            return torch.zeros((), device=genus_logits.device)
+
+        p_bg = genus_probs[:, idx_genus_background]
+        p_alive = health_probs[:, idx_health_alive]
+        # differentiable violation measure
+        violation = torch.relu(p_alive + p_bg - 1.0)
+        penalty = violation.mean()
         if torch.isnan(penalty):
-            print("Warning: NaN detected in consistency penalty")
-            penalty = torch.tensor(0.0, device=genus_logits.device)
-            
+            if self.debug:
+                print("[CoralMTLLoss] Consistency: NaN in penalty -> 0")
+            return torch.zeros((), device=genus_logits.device)
         return penalty
+
+    def _update_running_stats(self, loss_map: Dict[str, torch.Tensor]):
+        if not self.debug:
+            return
+        self._running_stats['steps'] += 1
+        for k, v in loss_map.items():
+            if not k.startswith('unweighted_'):
+                continue
+            val = float(v.detach().item())
+            if k not in self._running_stats['per_task_loss_mean']:
+                self._running_stats['per_task_loss_mean'][k] = val
+                self._running_stats['per_task_loss_m2'][k] = 0.0
+            else:
+                mean = self._running_stats['per_task_loss_mean'][k]
+                m2 = self._running_stats['per_task_loss_m2'][k]
+                n = self._running_stats['steps']
+                delta = val - mean
+                mean += delta / n
+                m2 += delta * (val - mean)
+                self._running_stats['per_task_loss_mean'][k] = mean
+                self._running_stats['per_task_loss_m2'][k] = m2
+        if self._running_stats['steps'] % 50 == 0:
+            summary = {t: round(self._running_stats['per_task_loss_mean'][t],4) for t in self._running_stats['per_task_loss_mean']}
+            print(f"[CoralMTLLoss][debug] running mean unweighted losses: {summary}")
+
+    def compute_unweighted_losses(self, predictions: Dict[str, torch.Tensor], targets: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        """Compute and return per-task unweighted losses (primary + auxiliary).
+
+        This isolates raw task loss computation so gradient-based strategies
+        can perform multiple backward passes externally.
+        """
+        unweighted_primary_losses: Dict[str, torch.Tensor] = {}
+        for task in self.primary_tasks:
+            if task in predictions and task in targets:
+                unweighted_primary_losses[task] = self.primary_loss_fn(predictions[task], targets[task])
+        unweighted_aux_losses: Dict[str, torch.Tensor] = {}
+        for task in self.aux_tasks:
+            if task in predictions and task in targets and task in self.aux_losses:
+                unweighted_aux_losses[task] = self.aux_losses[task](predictions[task], targets[task].long())
+        merged = {**unweighted_primary_losses, **unweighted_aux_losses}
+        return merged
 
     def forward(self,
                 predictions: Dict[str, torch.Tensor],
@@ -206,7 +264,12 @@ class CoralMTLLoss(nn.Module):
         unweighted_aux_losses = {}
         for task in self.aux_tasks:
             if task in predictions and task in targets:
-                unweighted_aux_losses[task] = self.aux_losses[task](predictions[task], targets[task].long())
+                aux_loss = self.aux_losses[task](predictions[task], targets[task].long())
+                if torch.isnan(aux_loss):
+                    if self.debug:
+                        print(f"[CoralMTLLoss] NaN detected in auxiliary loss for task '{task}' -> replacing with 0")
+                    aux_loss = torch.zeros_like(aux_loss)
+                unweighted_aux_losses[task] = aux_loss
         
         if predictions:
             base_device = next(iter(predictions.values())).device
@@ -218,18 +281,7 @@ class CoralMTLLoss(nn.Module):
         loss_auxiliary_sum = sum(unweighted_aux_losses.values()) if unweighted_aux_losses else \
             torch.tensor(0.0, device=base_device)
 
-        # --- 2. Hierarchical Uncertainty Weighting with numerical stability ---
-        loss_primary_balanced = torch.tensor(0.0, device=loss_auxiliary_sum.device)
-        for task, loss in unweighted_primary_losses.items():
-            log_var_clamped = torch.clamp(self.log_vars_primary[task], -10, 10)
-            precision = torch.exp(-log_var_clamped)
-            loss_primary_balanced += (precision * loss + 0.5 * log_var_clamped)
-        
-        log_var_aux_clamped = torch.clamp(self.log_var_aux_group, -10, 10)
-        precision_aux_group = torch.exp(-log_var_aux_clamped)
-        loss_auxiliary_balanced = precision_aux_group * loss_auxiliary_sum + 0.5 * log_var_aux_clamped
-        
-        # --- 3. Optional Consistency Regularizer ---
+        # --- 2. Optional Consistency Regularizer (added to total post-weighting) ---
         loss_consistency = torch.tensor(0.0, device=loss_auxiliary_sum.device)
         if self.w_consistency > 0 and 'genus' in self.primary_tasks and 'health' in self.primary_tasks:
             if 'genus' in predictions and 'health' in predictions:
@@ -237,30 +289,44 @@ class CoralMTLLoss(nn.Module):
                 if torch.isnan(loss_consistency):
                     print(f"Warning: NaN detected in consistency loss: {loss_consistency}")
                     loss_consistency = torch.tensor(0.0, device=loss_auxiliary_sum.device)
+        # --- 3. Build unified raw losses dict for strategy ---
+        raw_losses: Dict[str, torch.Tensor] = {}
+        raw_losses.update(unweighted_primary_losses)
+        # Represent auxiliary as either individual tasks (preferred for strategy transparency)
+        raw_losses.update(unweighted_aux_losses)
+        if raw_losses:
+            self.weighting_strategy.cache_unweighted_losses(raw_losses)
+            weighted = self.weighting_strategy(raw_losses)
+        else:
+            weighted = {'total_loss': torch.zeros((), device=base_device)}
+        # Inject consistency after weighting to preserve strategy semantics
+        weighted['consistency_loss'] = loss_consistency
+        weighted['total_loss'] = weighted['total_loss'] + self.w_consistency * loss_consistency
+        if not torch.isfinite(weighted['total_loss']):
+            if self.debug:
+                print(f"[CoralMTLLoss] Non-finite total loss detected post-strategy (value={weighted['total_loss']}).")
+            weighted['total_loss'] = torch.nan_to_num(weighted['total_loss'], nan=1.0, posinf=1.0, neginf=1.0)
+        # --- 4. Aggregate primary/auxiliary balanced losses for reporting ---
+        primary_terms = [weighted[f'weighted_{t}_loss'] for t in self.primary_tasks if f'weighted_{t}_loss' in weighted]
+        aux_terms = [weighted[f'weighted_{t}_loss'] for t in self.aux_tasks if f'weighted_{t}_loss' in weighted]
+        if primary_terms:
+            weighted['primary_balanced_loss'] = sum(primary_terms)
+        else:
+            weighted['primary_balanced_loss'] = torch.zeros((), device=base_device)
+        if aux_terms:
+            weighted['aux_balanced_loss'] = sum(aux_terms)
+        else:
+            weighted['aux_balanced_loss'] = torch.zeros((), device=base_device)
 
-        # --- 4. Calculate Final Total Loss ---
-        total_loss = loss_primary_balanced + loss_auxiliary_balanced + self.w_consistency * loss_consistency
-        
-        # Final NaN check
-        if torch.isnan(total_loss):
-            print(f"Warning: NaN detected in total loss. Setting to 1.0 to prevent training collapse")
-            total_loss = torch.tensor(1.0, device=loss_auxiliary_sum.device, requires_grad=True)
-
-        # --- Populate dictionary of all components for logging ---
-        loss_dict['total_loss'] = total_loss
-        loss_dict['primary_balanced_loss'] = loss_primary_balanced
-        loss_dict['aux_balanced_loss'] = loss_auxiliary_balanced
-        loss_dict['consistency_loss'] = loss_consistency
-        
+        # --- 5. Compose final dict: unweighted_* + weighted outputs ---
         for task, loss in unweighted_primary_losses.items():
-            loss_dict[f'unweighted_{task}_loss'] = loss
-        
-        loss_dict['unweighted_aux_loss_sum'] = loss_auxiliary_sum
+            weighted[f'unweighted_{task}_loss'] = loss
         for task, loss in unweighted_aux_losses.items():
-            loss_dict[f'unweighted_{task}_loss'] = loss
-
-        for task, log_var in self.log_vars_primary.items():
-            loss_dict[f'log_var_{task}'] = log_var.detach()
-        loss_dict['log_var_aux_group'] = self.log_var_aux_group.detach()
+            weighted[f'unweighted_{task}_loss'] = loss
         
-        return loss_dict
+        weighted['unweighted_aux_loss_sum'] = loss_auxiliary_sum
+        
+        # Running stats
+        self._update_running_stats(weighted)
+        
+        return weighted

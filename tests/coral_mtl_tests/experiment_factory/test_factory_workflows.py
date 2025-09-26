@@ -68,6 +68,8 @@ class TestFactoryWorkflows:
             assert init_kwargs['model'] is mtl_factory.get_model()
             assert init_kwargs['test_loader'] is mtl_factory.get_dataloaders()['test']
             assert init_kwargs['metrics_calculator'] is mtl_factory.get_metrics_calculator()
+            assert init_kwargs['loss_fn'] is not None
+            assert init_kwargs['loss_fn'] is mtl_factory.get_loss_function()
             assert 'config' in init_kwargs
             expected_abs_path = str((mtl_factory.root_path / override_rel_path).resolve())
             assert Path(init_kwargs['config'].checkpoint_path) == Path(expected_abs_path)

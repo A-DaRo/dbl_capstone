@@ -2,7 +2,8 @@ import torch
 import json
 from pathlib import Path
 from tqdm import tqdm
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
+from collections import defaultdict
 
 
 from .inference import SlidingWindowInferrer
@@ -25,7 +26,8 @@ class Evaluator:
                  metrics_calculator: AbstractCoralMetrics,
                  metrics_storer: MetricsStorer,
                  config: object,
-                 metrics_processor: AdvancedMetricsProcessor = None):
+                 metrics_processor: Optional[AdvancedMetricsProcessor] = None,
+                 loss_fn: Optional[torch.nn.Module] = None):
         """
         Initializes the Evaluator.
 
@@ -48,6 +50,11 @@ class Evaluator:
         self.config = config
         self.device = torch.device(config.device)
         self.output_dir = Path(config.output_dir)
+        if loss_fn is not None:
+            self.loss_fn = loss_fn.to(self.device)
+            self.loss_fn.eval()
+        else:
+            self.loss_fn = None
 
     def evaluate(self) -> Dict[str, Any]:
         """
@@ -109,6 +116,7 @@ class Evaluator:
             
             loop = tqdm(self.test_loader, desc="Evaluating on Test Set")
             
+            test_loss_accumulator = defaultdict(list)
             with torch.no_grad():
                 for batch in loop:
                     # The test loader yields batches of full images.
@@ -148,6 +156,21 @@ class Evaluator:
                         # This is an MTL model - pass the full dictionary for CoralMTLMetrics
                         predictions_for_metrics = stitched_predictions_logits
                         predictions_logits_for_tier1 = stitched_predictions_logits
+
+                    # Compute loss components (if ground truth masks are compatible)
+                    masks_for_loss = batch.get('masks', batch.get('mask'))
+                    if isinstance(masks_for_loss, dict):
+                        masks_for_loss = {k: v.to(self.device, non_blocking=True) for k, v in masks_for_loss.items()}
+                    elif masks_for_loss is not None:
+                        masks_for_loss = masks_for_loss.to(self.device, non_blocking=True)
+                    if self.loss_fn is not None and masks_for_loss is not None:
+                        loss_dict_or_tensor = self.loss_fn(predictions_for_metrics, masks_for_loss)
+                        if isinstance(loss_dict_or_tensor, dict):
+                            for key, val in loss_dict_or_tensor.items():
+                                if torch.is_tensor(val):
+                                    test_loss_accumulator[key].append(float(val.detach().item()))
+                        else:
+                            test_loss_accumulator['total_loss'].append(float(loss_dict_or_tensor.detach().item()))
 
                     # Tier 1: Update metrics calculator with logits for comprehensive metrics
                     self.metrics_calculator.update(
@@ -194,6 +217,15 @@ class Evaluator:
         
         # Save the full, detailed report using the storer
         self.metrics_storer.save_final_report(final_metrics_report, "test_metrics_full_report.json")
+        # Aggregate & persist test loss metrics (namespaced)
+        if 'optimization_metrics' not in final_metrics_report:
+            final_metrics_report['optimization_metrics'] = {}
+        if test_loss_accumulator:
+            test_loss_report = {f"test_{k}": float(sum(v)/len(v)) for k, v in test_loss_accumulator.items() if len(v) > 0}
+            # Save separately via dedicated method
+            self.metrics_storer.save_test_loss_report(test_loss_report)
+            # Also merge into optimization metrics for convenience
+            final_metrics_report['optimization_metrics'].update(test_loss_report)
         print(f"Tier 1 evaluation report saved to {self.output_dir / 'test_metrics_full_report.json'}")
         print(f"Per-image confusion matrices saved to {self.output_dir / 'test_cms.jsonl'}")
         

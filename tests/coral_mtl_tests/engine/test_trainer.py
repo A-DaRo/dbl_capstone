@@ -139,6 +139,13 @@ def test_trainer_smoke_run(mock_model, mock_loaders, mock_loss_fn, mock_optimize
     assert mock_optimizer.step.call_count == 4  # 2 epochs * 2 batches
     assert mock_scheduler.step.call_count == 4
     assert mock_metrics_calculator.compute.call_count == 2 # Called each validation epoch
+    # Validate that train loss keys were merged into optimization_metrics when history stored
+    # We inspect calls to store_epoch_history
+    assert mock_metrics_storer.store_epoch_history.call_count == 2
+    stored_args, _ = mock_metrics_storer.store_epoch_history.call_args
+    metrics_payload = stored_args[0]
+    opt_metrics = metrics_payload.get('optimization_metrics', {})
+    assert any(k.startswith('train_') for k in opt_metrics.keys()), "Train namespaced losses missing in optimization_metrics"
 
 
 def test_trainer_manages_model_modes(mock_model, mock_loaders, mock_loss_fn, mock_optimizer, mock_scheduler,
@@ -200,6 +207,8 @@ def test_advanced_metrics_processor_lifecycle(
     )
     
     trainer.train()
+    # Ensure training loss integration occurred
+    assert mock_metrics_storer.store_epoch_history.call_count == mock_config.epochs
 
     mock_metrics_processor.start.assert_called_once()
     mock_metrics_processor.shutdown.assert_called_once()

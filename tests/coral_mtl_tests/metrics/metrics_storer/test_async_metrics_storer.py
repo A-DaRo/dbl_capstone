@@ -202,3 +202,27 @@ class TestAsyncMetricsStorer:
         assert per_metrics["mask_shape"] == [2, 2]
         assert per_metrics["num_pixels"] == 4
         assert set(per_metrics["unique_predictions"]) == {0, 1}
+
+    def test_store_loss_diagnostics_async(self, storer: AsyncMetricsStorer, tmp_path: Path) -> None:
+        """Loss diagnostics should be queued and written to the dedicated JSONL file."""
+        storer.open_for_run(is_testing=False)
+        storer.store_loss_diagnostics(
+            step=42,
+            epoch=3,
+            diagnostics={
+                "strategy_type": "IMGradStrategy",
+                "task_weights": {"genus": 0.5, "health": 0.5},
+                "gradient_update_norm": 1.23,
+            },
+        )
+        storer.wait_for_completion()
+        storer.shutdown()
+
+        diag_path = tmp_path / "loss_diagnostics.jsonl"
+        assert diag_path.exists()
+        content = diag_path.read_text().strip().splitlines()
+        assert len(content) == 1
+        record = json.loads(content[0])
+        assert record["step"] == 42
+        assert record["epoch"] == 3
+        assert record["task_weights"]["genus"] == pytest.approx(0.5)

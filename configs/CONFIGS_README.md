@@ -189,18 +189,6 @@ augmentations:
 
 ## Loss Configuration
 
-### Multi-Task Learning Loss (CoralMTL)
-
-```yaml
-loss:
-  type: "CompositeHierarchical"
-  params:
-    w_consistency: float        # OPTIONAL: Consistency penalty weight (default: 0.1)
-    hybrid_alpha: float         # REQUIRED: Weight for focal/CE component (0.0-1.0)
-    focal_gamma: float          # REQUIRED: Focal loss focusing parameter (default: 2.0)
-    ignore_index: int           # REQUIRED: Class index to ignore in loss calculation
-```
-
 ### Baseline Loss (SegFormerBaseline)
 
 ```yaml
@@ -236,25 +224,69 @@ loss:
     ignore_index: 0
 ```
 
+
+#### Loss Weighting & Gradient Combination Strategies
+
+For `CoralMTL` models, you must specify a strategy to balance the contributions of different tasks. This is configured under `loss.weighting_strategy`.
+
+```yaml
+loss:
+  type: "CompositeHierarchical"
+  # ... other params
+  weighting_strategy:
+    type: str         # REQUIRED: The name of the strategy to use.
+    params: dict      # OPTIONAL: Parameters for the chosen strategy.
+```
+
+**Available Strategies:**
+
+1.  **`Uncertainty` (Default, Loss-based)**
+    *   Balances tasks by learning their homoscedastic uncertainty. Computationally cheap.
+    *   **Params:** None.
+
+    ```yaml
+    weighting_strategy:
+      type: "Uncertainty"
+    ```
+
+2.  **`IMGrad` (Gradient-based)**
+    *   An advanced strategy that adaptively balances between mitigating gradient imbalance (via MGDA) and ensuring Pareto improvement (via CAGrad). Requires multiple backward passes per step.
+    *   **Params:**
+        *   `solver`: `str` - `'auto'`, `'qp'`, or `'pgd'`. Defaults to `'auto'`, which uses the `cvxopt` QP solver if installed, otherwise falls back to a PGD approximation.
+    
+    ```yaml
+    weighting_strategy:
+      type: "IMGrad"
+      params:
+        solver: "auto"
+    ```
+
+3.  **`NashMTL` (Gradient-based)**
+    *   A state-of-the-art strategy that frames task balancing as a bargaining game to find a proportionally fair update. It is invariant to loss scales but is computationally expensive.
+    *   **Params:**
+        *   `update_frequency`: `int` - How often to recompute the Nash weights (e.g., `10`). Higher values are much faster but may use slightly stale weights. Default: `1`.
+        *   `solver`: `str` - `'auto'`, `'ccp'`, or `'iterative'`. Defaults to `'auto'`, which uses the `cvxpy` solver if installed.
+        *   `max_norm`: `float` - Optional gradient clipping applied to the final update vector. Default: `0.0` (disabled).
+
+    ```yaml
+    weighting_strategy:
+      type: "NashMTL"
+      params:
+        update_frequency: 10
+        solver: "auto"
+        max_norm: 1.0
+    ```
+
 ---
 
 ## Optimizer Configuration
-
-### Required Parameters
-
-```yaml
-optimizer:
-  type: str                     # REQUIRED: Optimizer type
-  params:                       # REQUIRED: Optimizer-specific parameters
-```
-
-### Available Optimizers
 
 #### AdamWPolyDecay (Default)
 
 ```yaml
 optimizer:
   type: "AdamWPolyDecay"
+  use_pcgrad_wrapper: bool      # OPTIONAL: Set to true to enable PCGrad. Default: false.
   params:
     lr: float                   # REQUIRED: Learning rate (e.g., 6.0e-5)
     weight_decay: float         # REQUIRED: L2 regularization strength (e.g., 0.01)
@@ -263,19 +295,20 @@ optimizer:
     power: float                # REQUIRED: Polynomial decay power (e.g., 1.0)
 ```
 
-**Example**:
+**Example with PCGrad:**
+
+PCGrad is an orthogonal technique that mitigates gradient conflict. It can be combined with any loss or weighting strategy.
+
 ```yaml
 optimizer:
   type: "AdamWPolyDecay"
+  use_pcgrad_wrapper: true  # Enable PCGrad
   params:
     lr: 6.0e-5
-    weight_decay: 0.01
-    adam_betas: [0.9, 0.999]
-    warmup_ratio: 0.1
-    power: 1.0
+    # ... other params
 ```
-
 ---
+
 
 ## Metrics Configuration
 
@@ -789,6 +822,103 @@ def validate_config(config_path):
     except Exception as e:
         print(f"❌ Configuration error: {e}")
         return False
+
+    ```
+
+    ---
+
+    ## Reproducibility Pack: Multi-Task Optimization Strategy Templates
+
+    Below are copy/paste fragments demonstrating the major multi-task optimization strategies. Insert them under the existing `loss` (and `optimizer` when needed) sections.
+
+    ### 1. Baseline: Uncertainty Weighting (Single Backward Pass)
+    ```yaml
+    loss:
+      type: "CompositeHierarchical"
+      params:
+        w_consistency: 0.1
+        hybrid_alpha: 0.5
+        focal_gamma: 2.0
+        ignore_index: 0
+      weighting_strategy:
+        type: "Uncertainty"
+    ```
+
+    ### 2. Nash-MTL (Fairness / Scale Invariance)
+    Higher computational cost; reuse weights with `update_frequency` to reduce overhead.
+    ```yaml
+    loss:
+      type: "CompositeHierarchical"
+      params:
+        w_consistency: 0.1
+        hybrid_alpha: 0.5
+        focal_gamma: 2.0
+        ignore_index: 0
+      weighting_strategy:
+        type: "NashMTL"
+        params:
+          solver: "ccp"          # or "iterative" / "auto"
+          update_frequency: 10    # reuse computed weights for N steps
+          max_norm: 0.0           # optional gradient clipping
+    ```
+
+    ### 3. IMGrad (Magnitude Imbalance Focused)
+    ```yaml
+    loss:
+      type: "CompositeHierarchical"
+      params:
+        w_consistency: 0.1
+        hybrid_alpha: 0.5
+        focal_gamma: 2.0
+        ignore_index: 0
+      weighting_strategy:
+        type: "IMGrad"
+        params:
+          solver: "qp"           # or "pgd" / "auto"
+    ```
+
+    ### 4. Uncertainty + PCGrad (Conflict Mitigation Layer)
+    Retain simple weighting; add gradient surgery via optimizer wrapper.
+    ```yaml
+    loss:
+      type: "CompositeHierarchical"
+      params:
+        w_consistency: 0.1
+        hybrid_alpha: 0.5
+        focal_gamma: 2.0
+        ignore_index: 0
+      weighting_strategy:
+        type: "Uncertainty"
+
+    optimizer:
+      type: "AdamWPolyDecay"
+      use_pcgrad_wrapper: true
+      params:
+        lr: 6.0e-5
+        weight_decay: 0.01
+        adam_betas: [0.9, 0.999]
+        warmup_ratio: 0.1
+        power: 1.0
+    ```
+
+    ### 5. Strategy Selection Heuristic (Comment Only)
+    ```yaml
+    # Heuristic:
+    # 1. Start with Uncertainty
+    # 2. If large gradient_norm disparity -> NashMTL or IMGrad
+    # 3. If many negative cosine similarities -> enable PCGrad
+    # 4. If both -> prefer NashMTL; compare with IMGrad & Uncertainty+PCGrad
+    ```
+
+    ### 6. Where to Look for Diagnostics
+    - Gradient norms, cosine similarity, update norms: `validation/loss_diagnostics.jsonl`
+    - Epoch summaries: `history.json`
+    - Strategy-specific fields: `imgrad_cos_theta`, `task_weights`, `log_variances`, `nash_objective`.
+
+    For full theoretical context and formulations see:
+    - `project_specification/loss_and_optim_specification.md`
+    - Section "Choosing a Multi-Task Strategy" in `project_specification/theorethical_specification.md`
+
 
 # Usage
 validate_config("path/to/your/config.yaml")

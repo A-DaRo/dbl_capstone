@@ -117,3 +117,19 @@ def test_toy_overfit_decreases_loss(device):
         
     for i in range(len(losses) - 1):
         assert losses[i+1] < losses[i], f"Loss did not decrease at step {i+1}"
+
+
+@pytest.mark.parametrize("target_fill", [-100, 0])
+def test_loss_nan_invariance(device, target_fill):
+    """Ensure CoralLoss remains finite when no foreground pixels are present."""
+    num_classes = 4
+    h = w = 6
+    logits = torch.zeros((1, num_classes, h, w), device=device)
+    target = torch.full((1, h, w), target_fill, dtype=torch.long, device=device)
+
+    loss_fn = CoralLoss(ignore_index=-100)
+    loss = loss_fn(logits, target)
+
+    assert loss.shape == torch.Size([])
+    assert torch.isfinite(loss)
+    assert loss.item() >= 0.0

@@ -1,0 +1,98 @@
+{
+  "tasks.genus.ungrouped.mIoU": [
+    0.04082994946895515
+  ],
+  "tasks.genus.ungrouped.BIoU": [
+    0.0076446110177057994
+  ],
+  "tasks.genus.grouped.mIoU": [
+    0.07730352919011384
+  ],
+  "tasks.genus.grouped.BIoU": [
+    0.010311315202201373
+  ],
+  "tasks.health.ungrouped.mIoU": [
+    0.04082994946895515
+  ],
+  "tasks.health.ungrouped.BIoU": [
+    0.0076446110177057994
+  ],
+  "tasks.health.grouped.mIoU": [
+    0.1730735423884078
+  ],
+  "tasks.health.grouped.BIoU": [
+    0.02455052400717974
+  ],
+  "tasks.fish.ungrouped.mIoU": [
+    0.5097235275618691
+  ],
+  "tasks.fish.ungrouped.BIoU": [
+    0.010667467978681748
+  ],
+  "tasks.human_artifacts.ungrouped.mIoU": [
+    0.20956909656524658
+  ],
+  "tasks.human_artifacts.ungrouped.BIoU": [
+    0.0
+  ],
+  "tasks.substrate.ungrouped.mIoU": [
+    0.13846391305272018
+  ],
+  "tasks.substrate.ungrouped.BIoU": [
+    0.0048661467596804574
+  ],
+  "tasks.background.ungrouped.mIoU": [
+    0.284517765045166
+  ],
+  "tasks.background.ungrouped.BIoU": [
+    0.0
+  ],
+  "tasks.biota.ungrouped.mIoU": [
+    0.04955930723719396
+  ],
+  "tasks.biota.ungrouped.BIoU": [
+    0.0
+  ],
+  "global.mIoU": [
+    0.005392348181389114
+  ],
+  "global.BIoU": [
+    0.006670491959753236
+  ],
+  "global.classification_error": [
+    0.8524971008296717
+  ],
+  "global.background_error": [
+    0.13519430160516016
+  ],
+  "global.missed_error": [
+    0.0
+  ],
+  "global.Boundary_F1": [
+    0.013252127980993756
+  ],
+  "global.Boundary_Precision": [
+    0.010186677568181734
+  ],
+  "global.Boundary_Recall": [
+    0.01895858733572927
+  ],
+  "global.NLL": [
+    3.721935272216797
+  ],
+  "global.Brier_Score": [
+    0.9765647649765015
+  ],
+  "global.ECE": [
+    0.016664152964949608
+  ],
+  "train_total_loss": [
+    4.325218200683594
+  ],
+  "val_total_loss": [
+    3.6517553329467773
+  ],
+  "epoch": [
+    1
+  ]
+}

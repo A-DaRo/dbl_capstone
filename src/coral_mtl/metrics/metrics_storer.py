@@ -93,10 +93,30 @@ class MetricsStorer:
         self.history_path = os.path.join(self.output_dir, "history.json")
         self.val_cm_path = os.path.join(self.output_dir, "validation_cms.jsonl")
         self.test_cm_path = os.path.join(self.output_dir, "test_cms.jsonl")
+        self.loss_diagnostics_path = os.path.join(self.output_dir, "loss_diagnostics.jsonl")
 
         self._history_data: Dict[str, List] = {}
         self._val_cm_file = None
         self._test_cm_file = None
+        self._loss_diagnostics_file = None
+
+    @staticmethod
+    def _sanitize_for_json(obj: Any) -> Any:
+        """Recursively convert numpy/scalar objects into JSON-serializable types."""
+
+        if isinstance(obj, dict):
+            return {key: MetricsStorer._sanitize_for_json(value) for key, value in obj.items()}
+
+        if isinstance(obj, (list, tuple, set)):
+            return [MetricsStorer._sanitize_for_json(item) for item in obj]
+
+        if isinstance(obj, np.generic):
+            return obj.item()
+
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+
+        return obj
 
     def open_for_run(self, is_testing: bool = False):
         """Opens file handles for a validation or testing run."""
@@ -108,6 +128,8 @@ class MetricsStorer:
             self._test_cm_file = file_handle
         else:
             self._val_cm_file = file_handle
+            if self._loss_diagnostics_file is None:
+                self._loss_diagnostics_file = open(self.loss_diagnostics_path, 'a')
     
     def close(self):
         """Closes any open file handles."""
@@ -117,6 +139,21 @@ class MetricsStorer:
         if self._test_cm_file:
             self._test_cm_file.close()
             self._test_cm_file = None
+        if self._loss_diagnostics_file:
+            self._loss_diagnostics_file.close()
+            self._loss_diagnostics_file = None
+
+    def store_loss_diagnostics(self, step: int, epoch: int, diagnostics: Dict[str, Any]) -> None:
+        """Persist loss/strategy diagnostics for the given training step."""
+        if not self._loss_diagnostics_file:
+            return
+        record = {
+            "step": int(step),
+            "epoch": int(epoch),
+        }
+        record.update(self._sanitize_for_json(diagnostics))
+        self._loss_diagnostics_file.write(json.dumps(record) + '\n')
+        self._loss_diagnostics_file.flush()
 
     @staticmethod
     def _flatten_dict(d: Dict, parent_key: str = '', sep: str = '.') -> Dict:
@@ -248,8 +285,26 @@ class MetricsStorer:
     def save_final_report(self, metrics_report: Dict[str, Any], filename: str):
         """Saves the final metrics report as a JSON file."""
         report_path = os.path.join(self.output_dir, filename)
+        sanitized_report = self._sanitize_for_json(metrics_report)
         with open(report_path, 'w') as f:
-            json.dump(metrics_report, f, indent=2)
+            json.dump(sanitized_report, f, indent=2)
+
+    # ---------------- New API: Test Loss Report Persistence -----------------
+    def save_test_loss_report(self, loss_metrics: Dict[str, float]) -> None:
+        """Persist aggregated test-phase loss metrics.
+
+        Args:
+            loss_metrics: Mapping of namespaced loss component -> scalar float (already averaged).
+
+        Writes atomic JSON file 'test_loss_metrics.json' under output_dir.
+        """
+        # Sanitize and convert tensors / numpy types if present
+        sanitized = self._sanitize_for_json(loss_metrics)
+        path = os.path.join(self.output_dir, 'test_loss_metrics.json')
+        tmp = path + '.tmp'
+        with open(tmp, 'w') as f:
+            json.dump(sanitized, f, indent=2)
+        os.replace(tmp, path)
 
 
 class AsyncMetricsStorer:
@@ -267,6 +322,7 @@ class AsyncMetricsStorer:
         self._worker_thread: Optional[threading.Thread] = None
         self._shutdown_event = threading.Event()
         self._active_files: Dict[str, Any] = {}
+        self._loss_diagnostics_path = os.path.join(self.output_dir, "loss_diagnostics.jsonl")
         
         # Register cleanup on exit
         atexit.register(self.shutdown)
@@ -308,6 +364,8 @@ class AsyncMetricsStorer:
             file_handle = open(path, 'a')
             key = 'test' if is_testing else 'val'
             self._active_files[key] = file_handle
+            if not is_testing and 'loss' not in self._active_files:
+                self._active_files['loss'] = open(self._loss_diagnostics_path, 'a')
             
         elif task_type == 'store_per_image':
             is_testing = task['is_testing']
@@ -414,6 +472,18 @@ class AsyncMetricsStorer:
                 if file_handle:
                     file_handle.close()
             self._active_files.clear()
+
+        elif task_type == 'store_loss_diagnostics':
+            file_handle = self._active_files.get('loss')
+            if file_handle:
+                diagnostics = MetricsStorer._sanitize_for_json(task['diagnostics'])
+                record = {
+                    'step': int(task['step']),
+                    'epoch': int(task['epoch'])
+                }
+                record.update(diagnostics)
+                file_handle.write(json.dumps(record) + '\n')
+                file_handle.flush()
             
         elif task_type == 'save_report':
             report_path = os.path.join(self.output_dir, task['filename'])
@@ -479,6 +549,17 @@ class AsyncMetricsStorer:
             'num_classes_per_task': num_classes_per_task,
             'is_testing': is_testing,
             'epoch': epoch
+        }
+        self._storage_queue.put(task)
+
+    def store_loss_diagnostics(self, step: int, epoch: int, diagnostics: Dict[str, Any]) -> None:
+        """Queues loss diagnostics for asynchronous persistence."""
+        self._start_worker_if_needed()
+        task = {
+            'type': 'store_loss_diagnostics',
+            'step': step,
+            'epoch': epoch,
+            'diagnostics': diagnostics,
         }
         self._storage_queue.put(task)
     

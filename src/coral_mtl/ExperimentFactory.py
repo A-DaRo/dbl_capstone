@@ -21,6 +21,8 @@ from .data.dataset import CoralscapesMTLDataset, CoralscapesDataset
 from .data.augmentations import SegmentationAugmentation
 from .engine.optimizer import create_optimizer_and_scheduler
 from .engine.losses import CoralMTLLoss, CoralLoss
+from .engine.loss_weighting import build_weighting_strategy
+from .engine.gradient_strategies import GradientUpdateStrategy
 from .metrics.metrics import AbstractCoralMetrics, CoralMTLMetrics, CoralMetrics
 from .engine.trainer import Trainer
 from .engine.evaluator import Evaluator
@@ -302,6 +304,11 @@ class ExperimentFactory:
         else:
             raise ValueError(f"Unknown optimizer type '{optimizer_type}' specified in config.")
 
+        if optimizer_config.get('use_pcgrad_wrapper', False):
+            print("--- Wrapping optimizer with PCGrad ---")
+            from .engine.pcgrad import PCGrad
+            optimizer = PCGrad(optimizer)
+
         # 5. Cache and return
         self.optimizer = optimizer
         self.scheduler = scheduler
@@ -361,10 +368,14 @@ class ExperimentFactory:
             if not num_classes_dict:
                  raise ValueError("CoralMTLLoss requires 'task_definitions_path' to be set.")
             
+            # Build weighting strategy (backward compatible: defaults to Uncertainty weighting)
+            weighting_cfg = loss_config.get('weighting_strategy')
+            strategy = build_weighting_strategy(weighting_cfg, primary_tasks, aux_tasks)
             loss_fn = CoralMTLLoss(
                 num_classes=num_classes_dict,
                 primary_tasks=primary_tasks,
                 aux_tasks=aux_tasks,
+                weighting_strategy=strategy,
                 ignore_index=params.get('ignore_index', 0),
                 w_consistency=params.get('w_consistency', 0.1),
                 hybrid_alpha=params.get('hybrid_alpha', 0.5),
@@ -521,9 +532,32 @@ class ExperimentFactory:
         device = getattr(trainer_config, 'device', 'auto')
         if device == 'auto':
             trainer_config.device = "cuda" if torch.cuda.is_available() else "cpu"
+        pcgrad_cfg = self.config.get('trainer', {}).get('pcgrad', {})
+        trainer_config.pcgrad = SimpleNamespace(**pcgrad_cfg) if pcgrad_cfg else SimpleNamespace(enabled=False)
+
+        strategy_instance = getattr(loss_fn, 'weighting_strategy', None)
+        if isinstance(strategy_instance, GradientUpdateStrategy):
+            trainer_config.strategy_type = 'gradient'
+        else:
+            trainer_config.strategy_type = 'loss'
+        print(f"--- Trainer strategy type: {trainer_config.strategy_type} ---")
         
         # Inject other required configs
-        trainer_config.patch_size = self.config.get('data', {}).get('patch_size', 512)
+        patch_size = self.config.get('data', {}).get('patch_size', 512)
+        if isinstance(patch_size, int):
+            trainer_config.patch_size = (patch_size, patch_size)
+        elif isinstance(patch_size, (list, tuple)) and len(patch_size) == 2:
+            trainer_config.patch_size = tuple(patch_size)
+        else:
+            raise ValueError("Trainer patch_size must be int or sequence of length 2.")
+
+        stride_value = getattr(trainer_config, 'inference_stride', trainer_config.patch_size)
+        if isinstance(stride_value, int):
+            trainer_config.inference_stride = (stride_value, stride_value)
+        elif isinstance(stride_value, (list, tuple)) and len(stride_value) == 2:
+            trainer_config.inference_stride = tuple(stride_value)
+        else:
+            raise ValueError("trainer.inference_stride must be int or sequence of length 2.")
         
         # 4. Move model to the correct device
         print(f"5/5: Moving model and loss to device: {trainer_config.device}")
@@ -577,6 +611,7 @@ class ExperimentFactory:
         metrics_calculator = self.get_metrics_calculator()
         metrics_storer = self.get_metrics_storer()
         metrics_processor = self.get_advanced_metrics_processor()  # Get Tier 2/3 processor
+        loss_fn = self.get_loss_function()
         
         # --- Prepare configuration object for the Evaluator ---
         trainer_config = self.config.get('trainer', {})
@@ -600,12 +635,28 @@ class ExperimentFactory:
         if not os.path.isabs(eval_output_dir):
             eval_output_dir = str(self.root_path / eval_output_dir)
 
+        eval_patch_size = self.config.get('data', {}).get('patch_size', 512)
+        if isinstance(eval_patch_size, int):
+            eval_patch_size = (eval_patch_size, eval_patch_size)
+        elif isinstance(eval_patch_size, (list, tuple)) and len(eval_patch_size) == 2:
+            eval_patch_size = tuple(eval_patch_size)
+        else:
+            raise ValueError("Evaluation patch_size must be int or sequence of length 2.")
+
+        eval_stride = eval_config_dict.get('inference_stride', 256)
+        if isinstance(eval_stride, int):
+            eval_stride = (eval_stride, eval_stride)
+        elif isinstance(eval_stride, (list, tuple)) and len(eval_stride) == 2:
+            eval_stride = tuple(eval_stride)
+        else:
+            raise ValueError("evaluator.inference_stride must be int or sequence of length 2.")
+
         eval_config = SimpleNamespace(
             device=trainer_config.get('device', 'auto'),
             checkpoint_path=final_checkpoint_path,
             output_dir=eval_output_dir,
-            patch_size=self.config.get('data', {}).get('patch_size', 512),
-            inference_stride=eval_config_dict.get('inference_stride', 256),
+            patch_size=eval_patch_size,
+            inference_stride=eval_stride,
             inference_batch_size=eval_config_dict.get('inference_batch_size', 16),
         )
         if eval_config.device == 'auto':
@@ -615,6 +666,9 @@ class ExperimentFactory:
         print(f"Moving model to device: {eval_config.device}")
         target_device = torch.device(eval_config.device)
         model = model.to(target_device)
+        if loss_fn is not None:
+            loss_fn = loss_fn.to(target_device)
+            loss_fn.eval()
 
         # --- Instantiate and run the Evaluator ---
         evaluator = Evaluator(
@@ -623,7 +677,8 @@ class ExperimentFactory:
             metrics_calculator=metrics_calculator,
             metrics_storer=metrics_storer,
             config=eval_config,
-            metrics_processor=metrics_processor  # Add Tier 2/3 processor
+            metrics_processor=metrics_processor,  # Add Tier 2/3 processor
+            loss_fn=loss_fn
         )
         
         final_metrics = evaluator.evaluate()

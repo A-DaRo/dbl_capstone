@@ -42,8 +42,8 @@ data:
   task_definitions_path: "./tests/configs/tasks/task_definitions.yaml"
   
   # Parameters for the final DataLoader object.
-  batch_size: 8
-  num_workers: 4
+  batch_size: 1
+  num_workers: 1
   
   # A fundamental parameter shared by datasets and augmentations.
   patch_size: 512
@@ -67,19 +67,18 @@ augmentations:
 # Configuration for Loss Function
 # --------------------------------------------------------------------------
 loss:
-  # This type corresponds to the CoralMTLLoss class for our main model.
   type: "CompositeHierarchical"
-
   params:
-    # Optional weight for the logical consistency penalty term.
     w_consistency: 0.1
-    # Weight for the primary loss component (Focal/CE) in the hybrid loss.
-    # The Dice loss component will have weight (1 - hybrid_alpha).
     hybrid_alpha: 0.5
-    # The focusing parameter for the Focal Loss component.
     focal_gamma: 2.0
-    # The class index to be ignored during loss calculation.
     ignore_index: 0
+  weighting_strategy:
+    type: "NashMTL"
+    params:
+      solver: "ccp"          # or "iterative" / "auto"
+      update_frequency: 10    # reuse computed weights for N steps
+      max_norm: 0.0           # optional gradient clipping
 
 # --------------------------------------------------------------------------
 # Configuration for Metrics
@@ -102,7 +101,7 @@ metrics:
 optimizer:
   # This type is mapped to the `create_optimizer_and_scheduler` function.
   type: "AdamWPolyDecay"
-
+  use_pcgrad_wrapper: true  # Enable PCGrad
   params:
     lr: 6.0e-5
     weight_decay: 0.01
@@ -117,10 +116,10 @@ optimizer:
 # --------------------------------------------------------------------------
 trainer:
   # The main device for training. Can be "cuda", "cpu", or "auto".
-  device: "cuda"
+  device: "cpu"
   
   # Total number of epochs for the training run.
-  epochs: 50
+  epochs: 1
   
   # Directory where checkpoints, logs, and other artifacts will be saved.
   output_dir: "tests/mock_dir/coral_mtl_test"
@@ -145,7 +144,7 @@ trainer:
   
   # The number of patches to process in a single batch during validation inference.
   # Increased from 16 to 24 for better GPU utilization
-  inference_batch_size: 24
+  inference_batch_size: 1
 
 # --------------------------------------------------------------------------
 # Configuration for the Evaluator Engine
@@ -163,7 +162,7 @@ evaluator:
   # Evaluator-specific inference settings (optimized for thorough testing)
   # Use slightly more conservative settings for final evaluation to ensure accuracy
   inference_stride: 320  # ~37% overlap for more thorough coverage
-  inference_batch_size: 20  # Slightly smaller batch for stability during testing
+  inference_batch_size: 1  # Slightly smaller batch for stability during testing
 
 # --------------------------------------------------------------------------
 # Tier 2/3 (CPU-based advanced metrics) Configuration
@@ -174,7 +173,7 @@ metrics_processor:
   
   # Number of CPU worker processes for parallel computation
   # Recommend: Number of physical CPU cores (e.g., 30+ for high-end systems)
-  num_cpu_workers: 30
+  num_cpu_workers: 1
   
   # List of advanced metrics to compute
   # Available: ["ASSD", "HD95", "PanopticQuality", "ARI", "VI"]

@@ -4,6 +4,8 @@ This document provides a comprehensive theoretical foundation for the Coral-MTL 
 
 For detailed technical implementation, class structures, and code documentation, please refer to the [**Technical Specification**](./technical_specification.md).
 
+For mathematical formulations and practical guidance on multi-task loss weighting and gradient-based optimization strategies (Uncertainty, IMGrad, Nash-MTL, PCGrad), see the dedicated [**Loss & Optimization Strategy Specification**](./loss_and_optim_specification.md).
+
 ---
 
 ## 1. Introduction & Scientific Context
@@ -116,6 +118,26 @@ Following Kendall & Gal (2017), we model task-specific uncertainty through learn
 
 #### Adaptive Task Balancing
 Unlike fixed weighting schemes, learnable uncertainty allows the model to automatically adapt task weights during training based on relative task difficulty and data quality.
+
+### 5.3. Choosing a Multi-Task Strategy (Practical Guidance)
+
+While this document emphasizes theoretical motivations, practitioners need an operational decision workflow:
+
+1. **Baseline First**: Start with `Uncertainty` weighting. It is stable, low-overhead (single backward), and establishes a performance baseline.
+2. **Inspect Diagnostics** (`loss_diagnostics.jsonl`):
+    - `gradient_norm`: Large persistent disparities → imbalance.
+    - `gradient_cosine_similarity`: Frequent negatives (< -0.3 / -0.5) → conflict.
+    - `imgrad_cos_theta`: (If using IMGrad) Low values indicate severe imbalance.
+3. **Select Strategy**:
+    - **Imbalance dominant**: Try `NashMTL` (scale-invariant fairness) or `IMGrad` (adaptive blend).
+    - **Conflict dominant**: Keep `Uncertainty`; enable `PCGrad` (optimizer wrapper).
+    - **Both present**: Prefer `NashMTL`; compare with `IMGrad` or `Uncertainty + PCGrad`.
+4. **Control Cost**:
+    - Increase `update_frequency` for `NashMTL` (e.g., 10–20) to amortize solver cost.
+    - Use iterative / PGD fallbacks when optional solvers absent.
+5. **Evaluate Properly**: Judge improvements via the configured `trainer.model_selection_metric` (e.g., `global.mIoU`, `optimization_metrics.H-Mean`), not raw loss alone.
+
+Full formulations and extended guidance: see the [Loss & Optimization Strategy Specification](./loss_and_optim_specification.md).
 
 ---
 
