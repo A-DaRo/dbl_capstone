@@ -14,63 +14,84 @@ This comprehensive guide documents all configurable parameters for the `Experime
 8. [Trainer Configuration](#trainer-configuration)
 9. [Evaluator Configuration](#evaluator-configuration)
 10. [Hyperparameter Study Configuration](#hyperparameter-study-configuration)
-11. [Visualization Configuration](#visualization-configuration)
-12. [Available Model Selection Metrics](#available-model-selection-metrics)
-13. [Configuration Examples](#configuration-examples)
-14. [Configuration Validation](#configuration-validation)
+11. [Available Model Selection Metrics](#available-model-selection-metrics)
+12. [Configuration Examples](#configuration-examples)
+13. [Configuration Validation](#configuration-validation)
 
 ---
 
 ## Configuration Structure
 
-All configurations are defined in YAML format and contain the following top-level sections:
+All configurations are defined in YAML format and contain the following top-level sections accessible through the `ExperimentFactory`:
 
 ```yaml
-model:          # Model architecture and parameters
-data:           # Dataset and dataloader configuration  
-augmentations:  # Data augmentation settings
-loss:           # Loss function configuration
-optimizer:      # Optimizer and scheduler settings
-metrics:        # Metrics calculation parameters
-trainer:        # Training loop configuration
-evaluator:      # Evaluation settings
-study:          # Optuna hyperparameter optimization (optional)
-visualizer:     # Plotting and visualization (optional)
+model:              # Model architecture and parameters  
+data:               # Dataset and dataloader configuration
+augmentations:      # Data augmentation settings (optional)
+loss:               # Loss function configuration
+optimizer:          # Optimizer and scheduler settings
+metrics:            # Metrics calculation parameters (optional)
+metrics_processor:  # Advanced metrics processing (optional)
+trainer:            # Training loop configuration
+evaluator:          # Evaluation settings (optional)
+study:              # Optuna hyperparameter optimization (optional)
 ```
 
 **Required Sections**: `model`, `data`, `loss`, `optimizer`, `trainer`  
-**Optional Sections**: `augmentations`, `metrics`, `evaluator`, `study`, `visualizer`
+**Optional Sections**: `augmentations`, `metrics`, `metrics_processor`, `evaluator`, `study`
+
+**Factory Methods Mapping:**
+- `model` → `ExperimentFactory.get_model()`
+- `data` → `ExperimentFactory.get_dataloaders()`  
+- `loss` → `ExperimentFactory.get_loss_function()`
+- `optimizer` → `ExperimentFactory.get_optimizer_and_scheduler()`
+- `metrics` → `ExperimentFactory.get_metrics_calculator()`
+- `trainer` → `ExperimentFactory.run_training()`
+- `evaluator` → `ExperimentFactory.run_evaluation()`
+- `study` → `ExperimentFactory.run_hyperparameter_study()`
 
 ---
 
 ## Model Configuration
 
+The model configuration defines the architecture and task setup for your experiment. The `ExperimentFactory.get_model()` method uses this configuration to instantiate the appropriate model class.
+
 ### Required Parameters
 
 ```yaml
 model:
-  type: str  # Model architecture type
-  params:    # Model-specific parameters
+  type: str  # REQUIRED: Model architecture type ("CoralMTL" or "SegFormerBaseline")
 ```
 
 ### Model Types
 
 #### 1. CoralMTL (Multi-Task Learning)
 
+**Required Configuration Structure:**
 ```yaml
 model:
-  type: "CoralMTL"
+  type: "CoralMTL"                    # REQUIRED: Must be exactly "CoralMTL"
   params:
-    backbone: str           # REQUIRED: SegFormer backbone (e.g., "nvidia/mit-b2")
-    decoder_channel: int    # REQUIRED: Decoder channel dimension (default: 256)
-    attention_dim: int      # REQUIRED: Cross-attention dimension (default: 128)
-  
+    backbone: str                     # REQUIRED: SegFormer backbone from Hugging Face
+    decoder_channel: int              # REQUIRED: Unified decoder channel dimension
+    attention_dim: int                # REQUIRED: Cross-attention dimension
+    encoder_weights: str              # OPTIONAL: Pre-trained weights (default: "imagenet")
+    encoder_depth: int                # OPTIONAL: Encoder depth (default: 5)
   tasks:
-    primary: list[str]      # REQUIRED: Primary task names for main decoders
-    auxiliary: list[str]    # REQUIRED: Auxiliary task names for additional decoders
+    primary: list[str]                # REQUIRED: Primary task names
+    auxiliary: list[str]              # REQUIRED: Auxiliary task names
 ```
 
-**Example**:
+**Parameter Details:**
+- `backbone`: Valid Hugging Face SegFormer model ID (see Available Backbones section)
+- `decoder_channel`: Integer, typically 128-512, controls model capacity
+- `attention_dim`: Integer, typically 64-256, dimension for cross-attention mechanism
+- `encoder_weights`: String, "imagenet" or None for random initialization
+- `encoder_depth`: Integer 1-5, number of encoder stages to use
+- `tasks.primary`: List of task names that must exist in `task_definitions.yaml`
+- `tasks.auxiliary`: List of auxiliary task names, also defined in task definitions
+
+**Complete Example:**
 ```yaml
 model:
   type: "CoralMTL"
@@ -78,6 +99,8 @@ model:
     backbone: "nvidia/mit-b2"
     decoder_channel: 256
     attention_dim: 128
+    encoder_weights: "imagenet"
+    encoder_depth: 5
   tasks:
     primary: ["genus", "health"]
     auxiliary: ["fish", "human_artifacts", "substrate", "background", "biota"]
@@ -85,16 +108,23 @@ model:
 
 #### 2. SegFormerBaseline (Single-Task)
 
+**Required Configuration Structure:**
 ```yaml
 model:
-  type: "SegFormerBaseline"
+  type: "SegFormerBaseline"           # REQUIRED: Must be exactly "SegFormerBaseline" 
   params:
-    backbone: str           # REQUIRED: SegFormer backbone (e.g., "nvidia/mit-b2")
-    decoder_channel: int    # REQUIRED: Decoder channel dimension (default: 256)
-    num_classes: int        # REQUIRED: Total number of output classes
+    backbone: str                     # REQUIRED: SegFormer backbone from Hugging Face
+    decoder_channel: int              # REQUIRED: MLP decoder channel dimension
+    num_classes: int                  # REQUIRED: Total number of output classes
+    encoder_weights: str              # OPTIONAL: Pre-trained weights (default: "imagenet")
+    encoder_depth: int                # OPTIONAL: Encoder depth (default: 5)
 ```
 
-**Example**:
+**Parameter Details:**
+- `num_classes`: Integer, total flattened classes from task definitions (e.g., 40)
+- Other parameters same as CoralMTL model
+
+**Complete Example:**
 ```yaml
 model:
   type: "SegFormerBaseline"
@@ -102,6 +132,8 @@ model:
     backbone: "nvidia/mit-b2"
     decoder_channel: 256
     num_classes: 40
+    encoder_weights: "imagenet"
+    encoder_depth: 5
 ```
 
 ### Available Backbones
@@ -117,15 +149,17 @@ model:
 
 ## Data Configuration
 
+The data configuration controls dataset loading, preprocessing, and DataLoader creation via `ExperimentFactory.get_dataloaders()`.
+
 ### Required Parameters
 
 ```yaml
 data:
   dataset_name: str              # REQUIRED: Local path or HuggingFace dataset ID
-  task_definitions_path: str     # REQUIRED: Path to task definitions YAML
-  batch_size: int               # REQUIRED: Training batch size
-  num_workers: int              # REQUIRED: DataLoader worker processes
-  patch_size: int               # REQUIRED: Image patch size for training
+  task_definitions_path: str     # REQUIRED: Path to task definitions YAML file
+  batch_size: int               # REQUIRED: Training batch size per GPU
+  num_workers: int              # REQUIRED: DataLoader worker processes (0-16 typical)
+  patch_size: int               # REQUIRED: Square patch size for training/inference
 ```
 
 ### Optional Parameters
@@ -133,9 +167,44 @@ data:
 ```yaml
 data:
   pds_train_path: str           # OPTIONAL: Path to PDS-sampled training patches
-  data_root_path: str           # OPTIONAL: Path to raw dataset (fallback)
-  ignore_index: int             # OPTIONAL: Class index to ignore (default: 255)
+  data_root_path: str           # OPTIONAL: Path to raw dataset (fallback for val/test)
+  ignore_index: int             # OPTIONAL: Class index to ignore in loss/metrics (default: 255)
 ```
+
+### Parameter Details
+
+**Required Parameters:**
+- `dataset_name`: 
+  - **Type**: String
+  - **Values**: Local path (absolute/relative) or HuggingFace dataset ID
+  - **Examples**: `"./dataset/coralscapes/"`, `"EPFL-ECEO/coralscapes"`
+  - **Factory Usage**: Passed to `CoralscapesMTLDataset` or `CoralscapesDataset`
+
+- `task_definitions_path`:
+  - **Type**: String (path)
+  - **Values**: Path to YAML file with class/task definitions
+  - **Required**: Always, even for baseline models (used for evaluation)
+  - **Factory Usage**: Loaded in `_initialize_task_splitter()` for class counts
+
+- `batch_size`:
+  - **Type**: Integer
+  - **Range**: 1-64 (depends on GPU memory and patch_size)
+  - **Factory Usage**: Used as `batch_size_per_gpu` in DataLoader creation
+
+- `num_workers`:
+  - **Type**: Integer  
+  - **Range**: 0-16 (0=no multiprocessing, higher=faster loading but more RAM)
+  - **Factory Usage**: Direct DataLoader parameter
+
+- `patch_size`:
+  - **Type**: Integer
+  - **Range**: 256, 512, 768, 1024 (powers of 2 recommended)
+  - **Factory Usage**: Controls spatial dimensions for training/augmentation
+
+**Optional Parameters:**
+- `pds_train_path`: Path to pre-processed training patches (prioritized over raw data)
+- `data_root_path`: Fallback path for validation/test splits when using PDS training
+- `ignore_index`: Class index ignored in loss computation (must match loss configuration)
 
 ### Complete Example
 
@@ -151,29 +220,69 @@ data:
   ignore_index: 0
 ```
 
-### Dataset Sources
+### Dataset Loading Priority
 
-1. **Local Path**: Absolute or relative path to local dataset
-2. **HuggingFace Hub**: Dataset ID (e.g., `"EPFL-ECEO/coralscapes"`)
+The factory follows this loading hierarchy:
+1. **Training Split**: Uses `pds_train_path` if available, otherwise `dataset_name`
+2. **Validation/Test**: Always uses `dataset_name` or `data_root_path` (full images)
+3. **Path Resolution**: Relative paths resolved from config file location
 
 ---
 
 ## Augmentations Configuration
 
-**Optional Section**: If omitted, no augmentations are applied.
+**Optional Section**: Controls data augmentation via `SegmentationAugmentation` class. If omitted, no augmentations are applied to training data.
+
+### Configuration Structure
 
 ```yaml
 augmentations:
-  crop_scale: list[float]       # OPTIONAL: RandomResizedCrop scale range (default: [0.5, 1.0])
-  rotation_degrees: int         # OPTIONAL: Random rotation range in degrees (default: 15)
-  jitter_params:               # OPTIONAL: ColorJitter parameters
-    brightness: float          # OPTIONAL: Brightness variation (default: 0.2)
-    contrast: float            # OPTIONAL: Contrast variation (default: 0.2)  
-    saturation: float          # OPTIONAL: Saturation variation (default: 0.2)
-    hue: float                # OPTIONAL: Hue variation (default: 0.1)
+  crop_scale: list[float]       # OPTIONAL: RandomResizedCrop scale range
+  rotation_degrees: int         # OPTIONAL: Random rotation range in degrees  
+  jitter_params:               # OPTIONAL: ColorJitter parameters (image-only)
+    brightness: float          # OPTIONAL: Brightness variation
+    contrast: float            # OPTIONAL: Contrast variation
+    saturation: float          # OPTIONAL: Saturation variation  
+    hue: float                # OPTIONAL: Hue variation
 ```
 
-**Example**:
+### Parameter Details
+
+- `crop_scale`:
+  - **Type**: List of two floats
+  - **Range**: [0.1, 1.0] for each value, first ≤ second
+  - **Default**: [0.5, 1.0]
+  - **Usage**: Scale range for RandomResizedCrop before resize to patch_size
+
+- `rotation_degrees`:
+  - **Type**: Integer
+  - **Range**: 0-180 degrees
+  - **Default**: 15
+  - **Usage**: Random rotation in range [-degrees, +degrees]
+
+- `jitter_params.*`:
+  - **Type**: Float for each parameter
+  - **Range**: 0.0-1.0 (0.0 = no effect)
+  - **Default**: brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1
+  - **Usage**: Applied only to images (not masks) for color variation
+
+### Augmentation Pipeline
+
+The factory applies augmentations in this order:
+1. **Geometric transforms** (synchronized on image + all masks):
+   - RandomResizedCrop with `crop_scale`
+   - RandomHorizontalFlip (p=0.5)
+   - RandomVerticalFlip (p=0.5) 
+   - RandomRotation with `rotation_degrees`
+
+2. **Color transforms** (image only):
+   - ColorJitter with `jitter_params`
+   - GaussianBlur (kernel_size=(5,9), sigma=(0.1,5.0))
+
+3. **Normalization**: ImageNet mean/std applied to final image
+
+### Example Configuration
+
 ```yaml
 augmentations:
   crop_scale: [0.5, 1.0]
@@ -185,26 +294,151 @@ augmentations:
     hue: 0.1
 ```
 
+### Factory Integration
+
+- **Training**: Augmentations applied via `SegmentationAugmentation`
+- **Validation/Test**: No augmentations (only normalization)
+- **Dependency**: Requires `data.patch_size` for final crop dimensions
+
 ---
 
 ## Loss Configuration
 
-### Baseline Loss (SegFormerBaseline)
+The loss configuration defines the loss function used for training via `ExperimentFactory.get_loss_function()`. The factory automatically selects the appropriate loss class based on model type.
+
+### Loss Types by Model
+
+#### Multi-Task Loss (CoralMTL Models)
+
+**Configuration Structure:**
+```yaml
+loss:
+  type: "CompositeHierarchical"        # REQUIRED: Must be exactly "CompositeHierarchical"
+  params:
+    w_consistency: float               # OPTIONAL: Consistency regularizer weight (0.0-1.0, default: 0.1)
+    hybrid_alpha: float                # REQUIRED: Primary loss weight (0.0-1.0)
+    focal_gamma: float                 # REQUIRED: Focal loss focusing parameter (1.0-5.0)
+    ignore_index: int                  # REQUIRED: Class index to ignore (must match data config)
+  weighting_strategy:                  # OPTIONAL: Multi-task weighting strategy
+    type: str                          # Strategy name (default: "Uncertainty")
+    params: dict                       # Strategy-specific parameters
+```
+
+**Parameter Details:**
+- `w_consistency`: Weight for logical consistency penalty between genus/health tasks
+- `hybrid_alpha`: Balance between Focal/CE loss (hybrid_alpha) and Dice loss (1-hybrid_alpha)
+- `focal_gamma`: Focusing parameter for Focal Loss (higher = more focus on hard examples)
+- `ignore_index`: Class index excluded from loss calculation (typically background)
+
+#### Single-Task Loss (SegFormerBaseline Models)
+
+**Configuration Structure:**
+```yaml
+loss:
+  type: "HybridLoss"                   # REQUIRED: Must be exactly "HybridLoss"
+  params:
+    primary_loss_type: str             # REQUIRED: "focal" or "cross_entropy"
+    hybrid_alpha: float                # REQUIRED: Primary loss weight (0.0-1.0)  
+    focal_gamma: float                 # REQUIRED: Focal loss gamma (if primary_loss_type="focal")
+    dice_smooth: float                 # OPTIONAL: Dice loss smoothing (default: 1.0)
+    ignore_index: int                  # REQUIRED: Class index to ignore
+```
+
+**Parameter Details:**
+- `primary_loss_type`: Main classification loss ("focal" recommended for imbalanced data)
+- `dice_smooth`: Smoothing factor for Dice loss to prevent division by zero
+- Other parameters same as MTL loss
+
+### Multi-Task Weighting Strategies
+
+For CoralMTL models, you can specify how to balance losses from different tasks:
+
+#### 1. Uncertainty Weighting (Default, Loss-based)
+
+Learns task-specific uncertainty parameters to balance contributions automatically.
 
 ```yaml
 loss:
-  type: "HybridLoss"
+  type: "CompositeHierarchical"
   params:
-    primary_loss_type: str      # REQUIRED: "focal" or "cross_entropy"
-    hybrid_alpha: float         # REQUIRED: Weight for primary loss component (0.0-1.0)
-    focal_gamma: float          # OPTIONAL: Focal loss gamma (required if primary_loss_type="focal")
-    dice_smooth: float          # OPTIONAL: Dice loss smoothing factor (default: 1.0)
-    ignore_index: int           # REQUIRED: Class index to ignore in loss calculation
+    # ... other params
+  weighting_strategy:
+    type: "Uncertainty"
+    params:
+      clamp_range: float               # OPTIONAL: Clamp log variance to [-range, +range] (default: 10.0)
+      learnable_tasks: list[str]       # OPTIONAL: Tasks with learnable weights (default: primary tasks)
 ```
 
-**Examples**:
+#### 2. IMGrad (Gradient-based)
+
+Advanced gradient balancing combining MGDA and CAGrad for conflict resolution.
+
 ```yaml
-# MTL Loss
+loss:
+  type: "CompositeHierarchical"
+  params:
+    # ... other params  
+  weighting_strategy:
+    type: "IMGrad"
+    params:
+      solver: str                      # OPTIONAL: "auto", "qp", or "pgd" (default: "auto")
+      mgda_pg_steps: int              # OPTIONAL: Projected gradient steps (default: 25)
+      mgda_lr: float                  # OPTIONAL: MGDA learning rate (default: 0.25)
+```
+
+#### 3. NashMTL (Game-theoretic)
+
+Frames multi-task learning as a bargaining game for proportionally fair updates.
+
+```yaml
+loss:
+  type: "CompositeHierarchical"
+  params:
+    # ... other params
+  weighting_strategy:
+    type: "NashMTL" 
+    params:
+      update_frequency: int            # OPTIONAL: Recompute weights every N steps (default: 25)
+      solver: str                      # OPTIONAL: "auto", "ccp", or "iterative" (default: "auto")
+      max_norm: float                  # OPTIONAL: Gradient clipping norm (default: 0.0, disabled)
+      optim_niter: int                # OPTIONAL: Optimization iterations (default: 20)
+```
+
+#### 4. DWA (Dynamic Weight Averaging)
+
+Adjusts task weights based on recent loss trends.
+
+```yaml
+loss:
+  type: "CompositeHierarchical"
+  params:
+    # ... other params
+  weighting_strategy:
+    type: "DWA"
+    params:
+      temperature: float               # OPTIONAL: Softmax temperature (default: 2.0)
+```
+
+#### 5. GradNorm
+
+Balances gradients to maintain similar learning rates across tasks.
+
+```yaml
+loss:
+  type: "CompositeHierarchical"  
+  params:
+    # ... other params
+  weighting_strategy:
+    type: "GradNorm"
+    params:
+      alpha: float                     # OPTIONAL: Restoring force strength (default: 0.5)
+      lr: float                       # OPTIONAL: Weight update learning rate (default: 0.025)
+```
+
+### Complete Examples
+
+**MTL with Uncertainty Weighting:**
+```yaml
 loss:
   type: "CompositeHierarchical"
   params:
@@ -212,8 +446,14 @@ loss:
     hybrid_alpha: 0.5
     focal_gamma: 2.0
     ignore_index: 0
+  weighting_strategy:
+    type: "Uncertainty"
+    params:
+      clamp_range: 10.0
+```
 
-# Baseline Loss  
+**Baseline with Focal Loss:**
+```yaml
 loss:
   type: "HybridLoss"
   params:
@@ -224,150 +464,382 @@ loss:
     ignore_index: 0
 ```
 
-
-#### Loss Weighting & Gradient Combination Strategies
-
-For `CoralMTL` models, you must specify a strategy to balance the contributions of different tasks. This is configured under `loss.weighting_strategy`.
-
-```yaml
-loss:
-  type: "CompositeHierarchical"
-  # ... other params
-  weighting_strategy:
-    type: str         # REQUIRED: The name of the strategy to use.
-    params: dict      # OPTIONAL: Parameters for the chosen strategy.
-```
-
-**Available Strategies:**
-
-1.  **`Uncertainty` (Default, Loss-based)**
-    *   Balances tasks by learning their homoscedastic uncertainty. Computationally cheap.
-    *   **Params:** None.
-
-    ```yaml
-    weighting_strategy:
-      type: "Uncertainty"
-    ```
-
-2.  **`IMGrad` (Gradient-based)**
-    *   An advanced strategy that adaptively balances between mitigating gradient imbalance (via MGDA) and ensuring Pareto improvement (via CAGrad). Requires multiple backward passes per step.
-    *   **Params:**
-        *   `solver`: `str` - `'auto'`, `'qp'`, or `'pgd'`. Defaults to `'auto'`, which uses the `cvxopt` QP solver if installed, otherwise falls back to a PGD approximation.
-    
-    ```yaml
-    weighting_strategy:
-      type: "IMGrad"
-      params:
-        solver: "auto"
-    ```
-
-3.  **`NashMTL` (Gradient-based)**
-    *   A state-of-the-art strategy that frames task balancing as a bargaining game to find a proportionally fair update. It is invariant to loss scales but is computationally expensive.
-    *   **Params:**
-        *   `update_frequency`: `int` - How often to recompute the Nash weights (e.g., `10`). Higher values are much faster but may use slightly stale weights. Default: `1`.
-        *   `solver`: `str` - `'auto'`, `'ccp'`, or `'iterative'`. Defaults to `'auto'`, which uses the `cvxpy` solver if installed.
-        *   `max_norm`: `float` - Optional gradient clipping applied to the final update vector. Default: `0.0` (disabled).
-
-    ```yaml
-    weighting_strategy:
-      type: "NashMTL"
-      params:
-        update_frequency: 10
-        solver: "auto"
-        max_norm: 1.0
-    ```
-
 ---
 
 ## Optimizer Configuration
 
-#### AdamWPolyDecay (Default)
+The optimizer configuration controls the training optimization process via `ExperimentFactory.get_optimizer_and_scheduler()`. Currently, only AdamW with polynomial decay scheduling is supported.
+
+### Configuration Structure
 
 ```yaml
 optimizer:
-  type: "AdamWPolyDecay"
-  use_pcgrad_wrapper: bool      # OPTIONAL: Set to true to enable PCGrad. Default: false.
+  type: "AdamWPolyDecay"              # REQUIRED: Must be exactly "AdamWPolyDecay"
+  use_pcgrad_wrapper: bool            # OPTIONAL: Enable PCGrad wrapper (default: false)
   params:
-    lr: float                   # REQUIRED: Learning rate (e.g., 6.0e-5)
-    weight_decay: float         # REQUIRED: L2 regularization strength (e.g., 0.01)
-    adam_betas: list[float]     # REQUIRED: Adam beta parameters (e.g., [0.9, 0.999])
-    warmup_ratio: float         # REQUIRED: Fraction of training for warmup (e.g., 0.1)
-    power: float                # REQUIRED: Polynomial decay power (e.g., 1.0)
+    lr: float                         # REQUIRED: Base learning rate
+    weight_decay: float               # REQUIRED: L2 regularization strength  
+    adam_betas: list[float]           # REQUIRED: Adam momentum parameters [β₁, β₂]
+    warmup_ratio: float               # REQUIRED: Fraction of training for warmup
+    power: float                      # REQUIRED: Polynomial decay exponent
 ```
 
-**Example with PCGrad:**
+### Parameter Details
 
-PCGrad is an orthogonal technique that mitigates gradient conflict. It can be combined with any loss or weighting strategy.
+**Required Parameters:**
+- `lr`:
+  - **Type**: Float
+  - **Range**: 1e-6 to 1e-2 (typically 1e-5 to 1e-4 for SegFormer)
+  - **Usage**: Peak learning rate after warmup
 
+- `weight_decay`:
+  - **Type**: Float  
+  - **Range**: 0.0-0.1 (typically 0.01-0.05)
+  - **Usage**: L2 penalty on parameters (excludes biases and layer norms)
+
+- `adam_betas`:
+  - **Type**: List of two floats
+  - **Range**: [0.9, 0.999] typical for first, [0.99, 0.9999] for second
+  - **Usage**: Adam momentum parameters for gradient and squared gradient
+
+- `warmup_ratio`:
+  - **Type**: Float
+  - **Range**: 0.0-0.5 (typically 0.05-0.1)
+  - **Usage**: Linear warmup from 0 to `lr` over first `warmup_ratio * total_steps`
+
+- `power`:
+  - **Type**: Float  
+  - **Range**: 0.5-2.0 (typically 1.0)
+  - **Usage**: Polynomial decay exponent (1.0 = linear decay)
+
+**Optional Parameters:**
+- `use_pcgrad_wrapper`:
+  - **Type**: Boolean
+  - **Default**: false
+  - **Usage**: Wraps optimizer with PCGrad for gradient conflict mitigation
+  - **Compatible**: With any multi-task weighting strategy
+
+### Learning Rate Schedule
+
+The factory creates a polynomial decay schedule with warmup:
+
+1. **Warmup Phase** (0 to `warmup_ratio * total_steps`):
+   - Learning rate increases linearly from 0 to `lr`
+
+2. **Decay Phase** (warmup end to total_steps):
+   - Learning rate decays polynomially from `lr` to 1e-7
+   - Formula: `lr * (1 - progress)^power` where progress ∈ [0,1]
+
+### PCGrad Integration
+
+PCGrad is a gradient surgery technique that projects conflicting gradients to reduce negative interference between tasks.
+
+**When to Use:**
+- Multi-task models with gradient conflicts
+- Can be combined with any weighting strategy
+- Adds computational overhead but improves convergence
+
+**Configuration:**
 ```yaml
 optimizer:
   type: "AdamWPolyDecay"
-  use_pcgrad_wrapper: true  # Enable PCGrad
+  use_pcgrad_wrapper: true
   params:
     lr: 6.0e-5
-    # ... other params
+    weight_decay: 0.01
+    adam_betas: [0.9, 0.999]
+    warmup_ratio: 0.1
+    power: 1.0
 ```
+
+### Factory Dependencies
+
+The optimizer factory method requires:
+- **Model**: For parameter enumeration and decay grouping
+- **DataLoaders**: To calculate `total_steps = len(train_loader) * epochs`
+- **Trainer Config**: For `epochs` parameter
+
+### Complete Example
+
+```yaml
+optimizer:
+  type: "AdamWPolyDecay"
+  use_pcgrad_wrapper: false
+  params:
+    lr: 6.0e-5
+    weight_decay: 0.01
+    adam_betas: [0.9, 0.999] 
+    warmup_ratio: 0.1
+    power: 1.0
+```
+
+### Parameter Recommendations
+
+**For SegFormer Backbones:**
+- `lr`: 6e-5 (B0/B1), 4e-5 (B2/B3), 2e-5 (B4/B5)
+- `weight_decay`: 0.01-0.05
+- `warmup_ratio`: 0.1 (10% of training)
+- `power`: 1.0 (linear decay)
 ---
 
 
 ## Metrics Configuration
 
-**Optional Section**: If omitted, default metrics are calculated.
+**Optional Section**: Controls metric calculation via `ExperimentFactory.get_metrics_calculator()`. If omitted, default values are used.
+
+### Configuration Structure
 
 ```yaml
 metrics:
-  boundary_thickness: int       # OPTIONAL: BIoU boundary thickness in pixels (default: 2)
-  ignore_index: int            # OPTIONAL: Class index to ignore (should match loss)
+  boundary_thickness: int       # OPTIONAL: BIoU boundary thickness in pixels
+  ignore_index: int            # OPTIONAL: Class index to ignore in metrics
   primary_tasks: list[str]     # OPTIONAL: Tasks for H-Mean calculation (MTL only)
+  use_async_storage: bool      # OPTIONAL: Enable async metrics storage
 ```
 
-**Example**:
+### Parameter Details
+
+- `boundary_thickness`:
+  - **Type**: Integer
+  - **Range**: 1-10 pixels
+  - **Default**: 2
+  - **Usage**: Pixel width of boundary region for Boundary IoU calculation
+
+- `ignore_index`:
+  - **Type**: Integer  
+  - **Default**: 255
+  - **Usage**: Class index excluded from metric calculation (should match loss config)
+
+- `primary_tasks`:
+  - **Type**: List of strings
+  - **Usage**: Task names used for H-Mean calculation in MTL models
+  - **Requirement**: Must match task names in `task_definitions.yaml`
+
+- `use_async_storage`:
+  - **Type**: Boolean
+  - **Default**: true
+  - **Usage**: Enable asynchronous confusion matrix storage for better performance
+
+### Advanced Metrics Processing
+
+**Optional Section**: Controls Tier 2/3 advanced metrics computation.
+
+```yaml
+metrics_processor:
+  enabled: bool                 # REQUIRED: Enable advanced metrics computation  
+  num_cpu_workers: int         # OPTIONAL: Number of CPU worker processes
+  tasks: list[str]             # OPTIONAL: Advanced metrics to compute
+```
+
+**Parameter Details:**
+- `enabled`:
+  - **Type**: Boolean
+  - **Default**: false
+  - **Usage**: Enables computationally expensive per-image metrics
+
+- `num_cpu_workers`:
+  - **Type**: Integer
+  - **Range**: 1-64 (depends on system)
+  - **Default**: 30
+  - **Usage**: Parallel workers for advanced metric computation
+
+- `tasks`:
+  - **Type**: List of strings
+  - **Default**: ["ASSD", "HD95", "PanopticQuality", "ARI"]
+  - **Available**: "ASSD", "HD95", "PanopticQuality", "ARI"
+
+### Metric Calculation Hierarchy
+
+The factory uses a three-tier metrics system:
+
+**Tier 1 (Real-time, GPU):**
+- Confusion matrices
+- IoU, mIoU per class/task
+- Boundary IoU (BIoU)
+- Calibration metrics (NLL, Brier, ECE)
+
+**Tier 2/3 (Async, CPU):**
+- Average Symmetric Surface Distance (ASSD)
+- 95th Percentile Hausdorff Distance (HD95)  
+- Panoptic Quality metrics
+- Adjusted Rand Index (ARI)
+
+### Factory Integration
+
+- **Metrics Calculator**: Uses `CoralMTLMetrics` or `CoralMetrics` based on model type
+- **Storage**: Integrates with `MetricsStorer` for persistence
+- **Dependencies**: Requires task splitter and configured output directory
+
+### Complete Examples
+
+**Basic Metrics Configuration:**
 ```yaml
 metrics:
   boundary_thickness: 4
   ignore_index: 0
   primary_tasks: ["genus", "health"]
+  use_async_storage: true
+```
+
+**With Advanced Metrics Enabled:**
+```yaml
+metrics:
+  boundary_thickness: 2
+  ignore_index: 0
+  primary_tasks: ["genus", "health"]
+
+metrics_processor:
+  enabled: true
+  num_cpu_workers: 16
+  tasks: ["ASSD", "HD95"]
+```
+
+**Minimal Configuration (uses defaults):**
+```yaml
+# metrics section can be omitted entirely for defaults
 ```
 
 ---
 
 ## Trainer Configuration
 
+The trainer configuration controls the training loop execution via `ExperimentFactory.run_training()`. This section configures the `Trainer` class behavior.
+
 ### Required Parameters
 
 ```yaml
 trainer:
-  device: str                   # REQUIRED: "cuda", "cpu", or "auto"
-  epochs: int                   # REQUIRED: Number of training epochs
-  output_dir: str               # REQUIRED: Directory for saving outputs
-  model_selection_metric: str   # REQUIRED: Metric for best model selection
+  device: str                   # REQUIRED: Device for training ("cuda", "cpu", or "auto")
+  epochs: int                   # REQUIRED: Total number of training epochs
+  output_dir: str               # REQUIRED: Directory for saving checkpoints and logs
+  model_selection_metric: str   # REQUIRED: Metric name for best model selection
 ```
 
 ### Optional Parameters
 
 ```yaml
 trainer:
-  gradient_accumulation_steps: int    # OPTIONAL: Gradient accumulation (default: 1)
-  inference_stride: int              # OPTIONAL: Sliding window stride (default: patch_size/2)
-  inference_batch_size: int          # OPTIONAL: Validation batch size (default: 16)
-  val_frequency: int                 # OPTIONAL: Validation every N epochs (default: 1)
-  checkpoint_frequency: int          # OPTIONAL: Save checkpoint every N epochs (default: 10)
-  save_best_only: bool              # OPTIONAL: Save only best model (default: true)
-  early_stopping_patience: int      # OPTIONAL: Early stopping patience (default: 15)
-  min_delta: float                  # OPTIONAL: Minimum improvement threshold (default: 1e-4)
-  use_mixed_precision: bool         # OPTIONAL: Use FP16 training (default: false)
-  max_grad_norm: float              # OPTIONAL: Gradient clipping norm (default: 1.0)
-  log_frequency: int                # OPTIONAL: Log every N steps (default: 100)
+  gradient_accumulation_steps: int    # OPTIONAL: Steps to accumulate before optimizer update
+  inference_stride: int              # OPTIONAL: Sliding window stride for validation
+  inference_batch_size: int          # OPTIONAL: Batch size for validation inference
+  val_frequency: int                 # OPTIONAL: Validation frequency in epochs  
+  checkpoint_frequency: int          # OPTIONAL: Checkpoint saving frequency
+  save_best_only: bool              # OPTIONAL: Save only best model vs all epochs
+  early_stopping_patience: int      # OPTIONAL: Epochs to wait before stopping
+  min_delta: float                  # OPTIONAL: Minimum improvement for early stopping
+  use_mixed_precision: bool         # OPTIONAL: Enable FP16 training
+  max_grad_norm: float              # OPTIONAL: Gradient clipping threshold
+  log_frequency: int                # OPTIONAL: Training step logging frequency
 ```
 
-**Complete Example**:
+### Parameter Details
+
+**Required Parameters:**
+
+- `device`:
+  - **Type**: String
+  - **Values**: "cuda", "cpu", "auto"
+  - **Usage**: "auto" selects CUDA if available, otherwise CPU
+  - **Factory**: Resolves device and moves model/loss to target device
+
+- `epochs`:
+  - **Type**: Integer
+  - **Range**: 1-1000 (typical: 50-200)
+  - **Usage**: Total training epochs, used to calculate LR schedule
+
+- `output_dir`:
+  - **Type**: String (path)
+  - **Usage**: Base directory for all experiment outputs
+  - **Factory**: Creates directory structure, stores checkpoints/logs/metrics
+
+- `model_selection_metric`:
+  - **Type**: String
+  - **Values**: See "Available Model Selection Metrics" section
+  - **Usage**: Metric name for saving best model checkpoint
+
+**Optional Parameters:**
+
+- `gradient_accumulation_steps`:
+  - **Type**: Integer
+  - **Range**: 1-64
+  - **Default**: 1
+  - **Usage**: Effective batch size = `data.batch_size * accumulation_steps`
+
+- `inference_stride`:
+  - **Type**: Integer or tuple of integers
+  - **Default**: `patch_size // 2`  
+  - **Usage**: Sliding window stride for validation inference (can be (H, W))
+
+- `inference_batch_size`:
+  - **Type**: Integer
+  - **Range**: 1-64
+  - **Default**: 16
+  - **Usage**: Batch size for validation sliding window inference
+
+- `val_frequency`:
+  - **Type**: Integer
+  - **Range**: 1-50
+  - **Default**: 1
+  - **Usage**: Validate every N epochs
+
+- `checkpoint_frequency`:
+  - **Type**: Integer  
+  - **Default**: 10
+  - **Usage**: Save checkpoint every N epochs (in addition to best model)
+
+- `save_best_only`:
+  - **Type**: Boolean
+  - **Default**: true
+  - **Usage**: If false, saves checkpoint every epoch
+
+- `early_stopping_patience`:
+  - **Type**: Integer
+  - **Range**: 5-100
+  - **Default**: 15
+  - **Usage**: Stop training if no improvement for N epochs
+
+- `min_delta`:
+  - **Type**: Float
+  - **Range**: 1e-6 to 1e-2
+  - **Default**: 1e-4
+  - **Usage**: Minimum improvement threshold for early stopping
+
+- `use_mixed_precision`:
+  - **Type**: Boolean
+  - **Default**: false
+  - **Usage**: Enable FP16 automatic mixed precision (reduces memory, may affect stability)
+
+- `max_grad_norm`:
+  - **Type**: Float
+  - **Range**: 0.1-10.0
+  - **Default**: 1.0
+  - **Usage**: Gradient clipping threshold (0.0 disables)
+
+- `log_frequency`:
+  - **Type**: Integer
+  - **Range**: 1-1000
+  - **Default**: 100
+  - **Usage**: Log training metrics every N steps
+
+### Factory Integration
+
+The trainer configuration is processed by the factory as follows:
+
+1. **Device Resolution**: "auto" → CUDA if available, else CPU
+2. **Path Resolution**: Relative `output_dir` resolved to absolute path
+3. **Patch Size Injection**: Uses `data.patch_size` for inference configuration  
+4. **Strategy Detection**: Determines gradient vs loss-based multi-task strategy
+5. **Component Assembly**: Passes all components to `Trainer` class
+
+### Complete Example
+
 ```yaml
 trainer:
   device: "cuda"
   epochs: 100
-  output_dir: "experiments/baseline_comparisons/coral_baseline_b2_run"
+  output_dir: "experiments/coral_mtl_b2_run"
+  model_selection_metric: "H-Mean"
   gradient_accumulation_steps: 2
-  model_selection_metric: "global.mIoU"
   inference_stride: 256
   inference_batch_size: 16
   val_frequency: 1
@@ -380,62 +852,203 @@ trainer:
   log_frequency: 100
 ```
 
+### Output Directory Structure
+
+The factory creates this structure under `output_dir`:
+```
+output_dir/
+├── best_model.pth              # Best model checkpoint
+├── history.json                # Training/validation metrics per epoch
+├── validation_cms.jsonl        # Per-image confusion matrices (validation)
+├── loss_diagnostics.jsonl     # Loss component details per batch
+└── evaluation/                 # Created by evaluator (if run)
+    ├── test_cms.jsonl          # Test confusion matrices  
+    ├── test_metrics_full_report.json
+    └── advanced_metrics.jsonl  # If metrics_processor enabled
+```
+
 ---
 
 ## Evaluator Configuration
 
-**Optional Section**: If omitted, automatic evaluation settings are used.
+**Optional Section**: Controls final evaluation execution via `ExperimentFactory.run_evaluation()`. If omitted, automatic settings are used.
+
+### Configuration Structure
 
 ```yaml
 evaluator:
-  checkpoint_path: str          # OPTIONAL: Path to specific checkpoint (null for auto-detect)
-  output_dir: str              # OPTIONAL: Evaluation output directory (null for auto)
-  num_visualizations: int       # OPTIONAL: Number of qualitative samples (default: 8)
+  checkpoint_path: str          # OPTIONAL: Explicit path to model checkpoint
+  output_dir: str              # OPTIONAL: Evaluation output directory  
+  inference_stride: int         # OPTIONAL: Sliding window stride for test inference
+  inference_batch_size: int     # OPTIONAL: Batch size for test inference
+  num_visualizations: int       # OPTIONAL: Number of qualitative result images
 ```
 
-**Example**:
+### Parameter Details
+
+**All Parameters Optional:**
+
+- `checkpoint_path`:
+  - **Type**: String (path) or null
+  - **Default**: null (auto-detect)
+  - **Usage**: Explicit checkpoint file path
+  - **Auto-detection**: Uses `{trainer.output_dir}/best_model.pth`
+
+- `output_dir`:
+  - **Type**: String (path) or null  
+  - **Default**: null (auto-create)
+  - **Usage**: Directory for evaluation outputs
+  - **Auto-creation**: Uses `{trainer.output_dir}/evaluation/`
+
+- `inference_stride`:
+  - **Type**: Integer or tuple
+  - **Default**: 256
+  - **Usage**: Sliding window stride for test set inference
+  - **Range**: Typically `patch_size//4` to `patch_size//2`
+
+- `inference_batch_size`:
+  - **Type**: Integer
+  - **Range**: 1-64
+  - **Default**: 16
+  - **Usage**: Batch size for test inference (can be larger than training)
+
+- `num_visualizations`:
+  - **Type**: Integer
+  - **Range**: 0-50
+  - **Default**: 8
+  - **Usage**: Number of qualitative visualization images to generate
+
+### Factory Integration
+
+The evaluator factory method (`run_evaluation`) processes this configuration:
+
+1. **Checkpoint Resolution**: 
+   - Explicit path → use as-is
+   - null → auto-detect from `trainer.output_dir/best_model.pth`
+   - Relative paths → resolve to absolute
+
+2. **Output Directory Creation**:
+   - Explicit path → use as-is  
+   - null → create `{trainer.output_dir}/evaluation/`
+
+3. **Device Configuration**:
+   - Uses same device as trainer configuration
+   - Moves model and loss function to target device
+
+4. **Component Assembly**:
+   - Model, test dataloader, metrics calculator, loss function
+   - Passes all to `Evaluator` class for execution
+
+### Evaluation Outputs
+
+The evaluator creates these files in the output directory:
+
+```
+evaluation/
+├── test_cms.jsonl                    # Per-image confusion matrices
+├── test_metrics_full_report.json     # Comprehensive metrics summary
+├── qualitative_results_grid.png      # Visualization grid (if num_visualizations > 0)
+└── advanced_metrics.jsonl            # Advanced metrics (if metrics_processor enabled)
+```
+
+### Example Configurations
+
+**Minimal (all defaults):**
+```yaml
+evaluator: {}
+```
+
+**Explicit checkpoint:**
 ```yaml
 evaluator:
-  checkpoint_path: null
-  output_dir: null
-  num_visualizations: 8
+  checkpoint_path: "experiments/my_run/epoch_50.pth"
+  output_dir: "results/final_evaluation"
+  num_visualizations: 12
+```
+
+**Custom inference settings:**
+```yaml
+evaluator:
+  inference_stride: 128
+  inference_batch_size: 32
+  num_visualizations: 16
+```
+
+**Programmatic Usage:**
+```python
+# Can also be called programmatically with override
+factory = ExperimentFactory("config.yaml")
+results = factory.run_evaluation(
+    checkpoint_path="custom/path/model.pth"
+)
 ```
 
 ---
 
 ## Hyperparameter Study Configuration
 
-**Optional Section**: Only required for hyperparameter optimization.
+**Optional Section**: Controls Optuna-based hyperparameter optimization via `ExperimentFactory.run_hyperparameter_study()`.
 
-### Required Study Parameters
-
-```yaml
-study:
-  name: str                     # REQUIRED: Study name for identification
-  storage: str                  # REQUIRED: Storage backend (e.g., "sqlite:///study.db")
-  direction: str                # REQUIRED: "maximize" or "minimize"
-  n_trials: int                # REQUIRED: Number of optimization trials
-  config_path: str             # REQUIRED: Path to search space configuration
-```
-
-### Optional Study Parameters
+### Configuration Structure
 
 ```yaml
 study:
+  name: str                     # REQUIRED: Unique study identifier
+  storage: str                  # REQUIRED: Optuna storage backend URL
+  direction: str                # REQUIRED: "maximize" or "minimize"  
+  n_trials: int                # REQUIRED: Total number of optimization trials
+  config_path: str             # REQUIRED: Path to search space definition
   pruner:                      # OPTIONAL: Early trial termination
-    type: str                  # Pruner type (e.g., "MedianPruner")
-    params:                    # Pruner-specific parameters
-      n_startup_trials: int    # Trials before pruning starts
-      n_warmup_steps: int      # Steps before pruning evaluation
-      interval_steps: int      # Pruning evaluation interval
+    type: str                  # Pruner algorithm
+    params: dict               # Pruner-specific parameters
 ```
+
+### Parameter Details
+
+**Required Parameters:**
+
+- `name`:
+  - **Type**: String
+  - **Usage**: Unique identifier for the study (allows resuming)
+  - **Example**: "coral_mtl_lr_alpha_study"
+
+- `storage`:
+  - **Type**: String (URL)
+  - **Format**: `"sqlite:///path/to/study.db"` 
+  - **Usage**: Persistent storage for trial results and resumption
+
+- `direction`:
+  - **Type**: String
+  - **Values**: "maximize" or "minimize"
+  - **Usage**: Optimization direction for `trainer.model_selection_metric`
+
+- `n_trials`:
+  - **Type**: Integer
+  - **Range**: 10-1000+
+  - **Usage**: Total trials to execute (can resume if interrupted)
+
+- `config_path`:
+  - **Type**: String (path)
+  - **Usage**: Path to search space YAML file
+  - **Resolution**: Relative paths resolved from main config location
+
+**Optional Parameters:**
+
+- `pruner.type`:
+  - **Type**: String
+  - **Values**: "MedianPruner" (only supported type currently)
+  - **Usage**: Early stopping for unpromising trials
+
+- `pruner.params`:
+  - **Type**: Dictionary
+  - **Available**: `n_startup_trials`, `n_warmup_steps`, `interval_steps`
 
 ### Search Space Configuration
 
-The search space is defined in a separate YAML file:
+Create a separate YAML file defining the hyperparameter search space:
 
 ```yaml
-# search_space.yaml
+# search_space.yaml - Nested parameter paths with Optuna suggest configs
 optimizer.params.lr:
   type: "float"
   params:
@@ -445,7 +1058,7 @@ optimizer.params.lr:
     log: true
 
 model.params.decoder_channel:
-  type: "int"  
+  type: "int"
   params:
     name: "decoder_channel"
     low: 128
@@ -464,57 +1077,69 @@ augmentations.rotation_degrees:
   params:
     name: "rotation_degrees"
     choices: [0, 15, 30, 45]
+
+loss.weighting_strategy.type:
+  type: "categorical"
+  params:
+    name: "weighting_strategy"
+    choices: ["Uncertainty", "NashMTL", "IMGrad"]
 ```
 
-### Complete Study Example
+### Supported Parameter Types
+
+1. **Float Parameters:**
+   - `type: "float"`
+   - `params: {name, low, high, log: optional}`
+   - `log: true` for log-uniform distribution
+
+2. **Integer Parameters:**
+   - `type: "int"`
+   - `params: {name, low, high, step: optional}`
+
+3. **Categorical Parameters:**
+   - `type: "categorical"`
+   - `params: {name, choices: list}`
+
+### Factory Integration
+
+The study workflow:
+
+1. **Study Setup**: Creates/loads Optuna study with specified storage
+2. **Objective Function**: For each trial:
+   - Modifies config with sampled hyperparameters
+   - Creates new factory instance with trial config
+   - Runs complete training workflow
+   - Returns final validation metric value
+3. **Best Trial**: Reports optimal hyperparameters after completion
+
+### Complete Example
 
 ```yaml
 study:
-  name: "coral_hyperopt_study"
-  storage: "sqlite:///experiments/hyperopt.db"
+  name: "coral_mtl_comprehensive_study"
+  storage: "sqlite:///experiments/comprehensive_hyperopt.db"
   direction: "maximize"
-  n_trials: 50
-  config_path: "configs/search_space.yaml"
+  n_trials: 100
+  config_path: "configs/studies/comprehensive_search_space.yaml"
   pruner:
     type: "MedianPruner"
     params:
-      n_startup_trials: 5
-      n_warmup_steps: 10
+      n_startup_trials: 10
+      n_warmup_steps: 15
       interval_steps: 5
 ```
 
-### Supported Hyperparameter Types
+### Usage Pattern
 
-1. **Float**: `type: "float"` with `low`, `high`, `log` (optional)
-2. **Integer**: `type: "int"` with `low`, `high`, `step` (optional)
-3. **Categorical**: `type: "categorical"` with `choices` list
-
----
-
-## Visualization Configuration
-
-**Optional Section**: For customizing plots and visualizations.
-
-```yaml
-visualizer:
-  style: str                    # OPTIONAL: Matplotlib style (default: "seaborn-v0_8-whitegrid")
-  dpi: int                     # OPTIONAL: Figure DPI (default: 300)
-  figure_size: list[int]       # OPTIONAL: Figure size [width, height] (default: [12, 8])
-  color_palette: str           # OPTIONAL: Color palette (default: "viridis")
-  show_plots: bool             # OPTIONAL: Show interactive plots (default: false)
-  plot_format: str             # OPTIONAL: File format for saved plots (default: "png")
+```python
+# Programmatic execution
+factory = ExperimentFactory("config_with_study.yaml")
+factory.run_hyperparameter_study()  # Runs complete optimization
 ```
 
-**Example**:
-```yaml
-visualizer:
-  style: "seaborn-v0_8-whitegrid"
-  dpi: 300
-  figure_size: [12, 8]
-  color_palette: "viridis"
-  show_plots: false
-  plot_format: "png"
-```
+### Output
+
+Study results are persisted in the SQLite database and can be analyzed using Optuna's visualization tools or accessed programmatically for post-hoc analysis.
 
 ---
 
@@ -575,6 +1200,7 @@ trainer:
 ### Minimal MTL Configuration
 
 ```yaml
+# Minimum viable MTL configuration
 model:
   type: "CoralMTL"
   params:
@@ -583,7 +1209,7 @@ model:
     attention_dim: 128
   tasks:
     primary: ["genus", "health"]
-    auxiliary: ["fish", "human_artifacts", "substrate", "background", "biota"]
+    auxiliary: ["fish", "human_artifacts", "substrate"]
 
 data:
   dataset_name: "./dataset/coralscapes/"
@@ -618,6 +1244,7 @@ trainer:
 ### Minimal Baseline Configuration
 
 ```yaml
+# Minimum viable baseline configuration
 model:
   type: "SegFormerBaseline"
   params:
@@ -657,26 +1284,29 @@ trainer:
   model_selection_metric: "global.mIoU"
 ```
 
-### Full-Featured Configuration with Hyperparameter Study
+### Production MTL Configuration with Advanced Features
 
 ```yaml
+# Production-ready MTL configuration with all features
 model:
   type: "CoralMTL"
   params:
     backbone: "nvidia/mit-b2"
     decoder_channel: 256
     attention_dim: 128
+    encoder_weights: "imagenet"
+    encoder_depth: 5
   tasks:
     primary: ["genus", "health"]
     auxiliary: ["fish", "human_artifacts", "substrate", "background", "biota"]
 
 data:
   dataset_name: "EPFL-ECEO/coralscapes"
-  pds_train_path: "./data/processed/pds_patches/"
-  data_root_path: "./data/raw/coralscapes_raw/"
+  pds_train_path: "./dataset/processed/pds_patches/"
+  data_root_path: "./dataset/raw/coralscapes/"
   task_definitions_path: "configs/task_definitions.yaml"
   batch_size: 4
-  num_workers: 4
+  num_workers: 8
   patch_size: 512
   ignore_index: 0
 
@@ -696,9 +1326,16 @@ loss:
     hybrid_alpha: 0.5
     focal_gamma: 2.0
     ignore_index: 0
+  weighting_strategy:
+    type: "NashMTL"
+    params:
+      update_frequency: 10
+      solver: "auto"
+      max_norm: 1.0
 
 optimizer:
   type: "AdamWPolyDecay"
+  use_pcgrad_wrapper: true
   params:
     lr: 6.0e-5
     weight_decay: 0.01
@@ -707,52 +1344,116 @@ optimizer:
     power: 1.0
 
 metrics:
-  primary_tasks: ["genus", "health"]
   boundary_thickness: 2
   ignore_index: 0
+  primary_tasks: ["genus", "health"]
+  use_async_storage: true
+
+metrics_processor:
+  enabled: true
+  num_cpu_workers: 16
+  tasks: ["ASSD", "HD95", "PanopticQuality"]
 
 trainer:
-  epochs: 100
   device: "auto"
-  output_dir: "experiments/mtl_optimized"
+  epochs: 150
+  output_dir: "experiments/production_mtl_run"
   model_selection_metric: "H-Mean"
-  metric_mode: "max"
+  gradient_accumulation_steps: 2
+  inference_stride: 256
+  inference_batch_size: 16
   val_frequency: 1
   checkpoint_frequency: 10
   save_best_only: true
-  early_stopping_patience: 15
+  early_stopping_patience: 20
   min_delta: 1e-4
-  inference_stride: 256
-  inference_batch_size: 16
   use_mixed_precision: true
   max_grad_norm: 1.0
-  log_frequency: 100
+  log_frequency: 50
 
 evaluator:
-  checkpoint_path: null
-  output_dir: null
-  num_visualizations: 8
+  inference_stride: 128
+  inference_batch_size: 32
+  num_visualizations: 16
 
 study:
-  name: "coral_mtl_hyperopt"
-  storage: "sqlite:///experiments/hyperopt.db"
+  name: "production_coral_mtl_study"
+  storage: "sqlite:///experiments/production_hyperopt.db"
   direction: "maximize"
-  n_trials: 50
-  config_path: "configs/search_space.yaml"
+  n_trials: 100
+  config_path: "configs/advanced_search_space.yaml"
   pruner:
     type: "MedianPruner"
     params:
-      n_startup_trials: 5
-      n_warmup_steps: 10
+      n_startup_trials: 10
+      n_warmup_steps: 15
       interval_steps: 5
+```
 
-visualizer:
-  style: "seaborn-v0_8-whitegrid"
-  dpi: 300
-  figure_size: [12, 8]
-  color_palette: "viridis"
-  show_plots: false
-  plot_format: "png"
+### Baseline with Advanced Optimization
+
+```yaml
+# High-performance baseline configuration
+model:
+  type: "SegFormerBaseline"
+  params:
+    backbone: "nvidia/mit-b3"
+    decoder_channel: 512
+    num_classes: 40
+    encoder_weights: "imagenet"
+
+data:
+  dataset_name: "EPFL-ECEO/coralscapes"
+  pds_train_path: "./dataset/processed/pds_patches/"
+  task_definitions_path: "configs/task_definitions.yaml"
+  batch_size: 2
+  num_workers: 8
+  patch_size: 768
+  ignore_index: 0
+
+augmentations:
+  crop_scale: [0.6, 1.0]
+  rotation_degrees: 30
+  jitter_params:
+    brightness: 0.3
+    contrast: 0.3
+    saturation: 0.3
+    hue: 0.15
+
+loss:
+  type: "HybridLoss"
+  params:
+    primary_loss_type: "focal"
+    hybrid_alpha: 0.7
+    focal_gamma: 3.0
+    dice_smooth: 1.0
+    ignore_index: 0
+
+optimizer:
+  type: "AdamWPolyDecay"
+  params:
+    lr: 4.0e-5
+    weight_decay: 0.05
+    adam_betas: [0.9, 0.999]
+    warmup_ratio: 0.15
+    power: 0.9
+
+metrics:
+  boundary_thickness: 3
+  ignore_index: 0
+  primary_tasks: ["genus", "health"]
+
+trainer:
+  device: "cuda"
+  epochs: 200
+  output_dir: "experiments/advanced_baseline"
+  model_selection_metric: "global.BIoU"
+  gradient_accumulation_steps: 4
+  inference_stride: 192
+  inference_batch_size: 8
+  use_mixed_precision: true
+  max_grad_norm: 0.5
+  early_stopping_patience: 30
 ```
 
 ---
@@ -917,8 +1618,26 @@ def validate_config(config_path):
 
     For full theoretical context and formulations see:
     - `project_specification/loss_and_optim_specification.md`
-    - Section "Choosing a Multi-Task Strategy" in `project_specification/theorethical_specification.md`
-
+def validate_config(config_path):
+    """Quick configuration validation using ExperimentFactory."""
+    try:
+        factory = ExperimentFactory(config_path=config_path)
+        print(f"✅ Configuration '{config_path}' is valid")
+        
+        # Test component instantiation
+        model = factory.get_model()
+        print(f"   Model: {model.__class__.__name__}")
+        
+        dataloaders = factory.get_dataloaders()
+        print(f"   Dataloaders: {list(dataloaders.keys())}")
+        
+        loss_fn = factory.get_loss_function() 
+        print(f"   Loss: {loss_fn.__class__.__name__}")
+        
+        return True
+    except Exception as e:
+        print(f"❌ Configuration error: {e}")
+        return False
 
 # Usage
 validate_config("path/to/your/config.yaml")

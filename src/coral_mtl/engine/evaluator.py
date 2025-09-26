@@ -206,6 +206,13 @@ class Evaluator:
                             )
 
         finally:
+            # Ensure async per-image storage completes and flushes
+            async_storer = getattr(self.metrics_calculator, 'async_storer', None)
+            if async_storer is not None:
+                try:
+                    async_storer.wait_for_completion()
+                finally:
+                    async_storer.shutdown()
             # Ensure all resources are always closed safely
             self.metrics_storer.close()
             if self.metrics_processor:

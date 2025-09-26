@@ -340,7 +340,8 @@ class Trainer:
                     image_ids=image_ids,
                     epoch=epoch,
                     predictions_logits=predictions_logits_for_tier1,
-                    store_per_image=False  # Skip expensive disk I/O during training
+                    # Allow opt-in per-image CM storage during validation via config
+                    store_per_image=bool(getattr(self.config, 'store_per_image_validation', False))
                 )
                 
                 # Tier 2: Dispatch jobs to CPU worker pool (if enabled)

@@ -5,7 +5,8 @@ This document defines the testing strategy and detailed test plans for the Coral
 It covers:
 - Unit tests for each module/class in `src/coral_mtl` (functional correctness, shapes/types, and error handling)
 - Integration/behavioral tests for the full training/validation and evaluation flows
-- Concurrency and I/O tests for the two‑tier metrics architecture
+- Concurrency and I/O tests for the three‑tier metrics architecture
+- Advanced MTL optimization strategy testing (weighting and gradient strategies)
 - Execution guidance, fixtures, markers, coverage targets, and CI notes
 
 ---
@@ -15,7 +16,8 @@ It covers:
 - Verify that all components behave according to their contracts in the Technical Specification
 - Provide safety rails for refactors (API stability, backward compatibility where applicable)
 - Validate scientific correctness of key metrics and losses using controlled synthetic data
-- Ensure the concurrent, two‑tier metrics pipeline is robust (no deadlocks; graceful shutdown; correct outputs)
+- Ensure the concurrent, three‑tier metrics pipeline is robust (no deadlocks; graceful shutdown; correct outputs)
+- Validate advanced MTL optimization strategies (uncertainty weighting, NashMTL, IMGrad, PCGrad)
 - Keep tests deterministic, parallelizable, and reasonably fast; isolate optional dependencies with skips
 
 Out of scope: End‑to‑end perf benchmarks and large‑dataset metrics. Those are covered by notebooks and optional long‑running scripts.
@@ -24,14 +26,16 @@ Out of scope: End‑to‑end perf benchmarks and large‑dataset metrics. Those 
 
 ## 2. Test Levels and Organization
 
-- Unit tests: `tests/**` mirroring `src/coral_mtl/**`
+- Unit tests: `tests/coral_mtl_tests/**` mirroring `src/coral_mtl/**`
   - Fast, deterministic, single‑process unless concurrency is the subject
   - Use synthetic data and light stubs; avoid GPU dependency unless explicitly marked
-- Integration/behavioral tests: `tests/integration/**`
+- Integration/behavioral tests: `tests/coral_mtl_tests/experiment_factory/test_factory_workflows.py`
   - Exercise the training/validation loop, sliding‑window inference, and evaluation outputs
   - May run on CPU; keep images small (e.g., 32–128 px) to remain fast
-- Concurrency & Tier‑2 tests: `tests/concurrency/**`
+- Concurrency & Tier‑2/3 tests: `tests/coral_mtl_tests/metrics/test_three_tier_metric_pipeline.py`
   - Focused on `AdvancedMetricsProcessor` lifecycle, dispatch, writer output, task gating
+- Advanced Loss Strategy tests: `tests/coral_mtl_tests/engine/losses/`
+  - Test weighting strategies, gradient manipulation, and PCGrad integration
 
 Naming conventions: `test_<module>_<feature>.py` with parametrized cases where appropriate.
 
@@ -64,36 +68,66 @@ Below, “Acceptance” bullets describe pass/fail criteria; “Edge cases” li
 
 ### 4.1 Experiment Orchestration — `ExperimentFactory.py`
 
-Tests:
-- Build components from dict and from YAML (if path provided)
-- Caching: repeated getter calls return same instances (where intended)
-- Dependency injection: `Trainer`/`Evaluator` receive `metrics_calculator`, `metrics_storer`, and `AdvancedMetricsProcessor` (when enabled)
-- Metrics processor config parsing (enabled/disabled, num workers, tasks)
+Factory Initialization Tests:
+- Build components from config_dict and from YAML config_path
+- Path resolution: relative paths resolved correctly to absolute paths
+- Task splitter initialization: MTL vs Baseline splitter selection based on model type
+- Configuration validation: required fields present, invalid values rejected
+
+Component Factory Method Tests:
+- Caching behavior: repeated getter calls return same instances
+- Dependency injection: all components receive proper dependencies
+- Advanced metrics processor: conditional creation based on config
+- Loss function: weighting strategy integration, PCGrad wrapper optional
+
+Workflow Orchestration Tests:
+- `run_training()`: complete training pipeline with proper component assembly
+- `run_evaluation()`: evaluation workflow with checkpoint loading
+- `run_hyperparameter_study()`: Optuna integration with dynamic config modification
 
 Acceptance:
-- Correct classes instantiated; attributes present; no unexpected side effects
-- Metrics processor is None when disabled; constructed when enabled
+- Correct classes instantiated with proper parameters and dependencies
+- Metrics processor properly configured or None when disabled
+- All factory methods maintain caching contracts
+- Workflow methods handle device assignment and component coordination
 
 Edge cases:
-- Missing optional blocks; invalid values cause clear exceptions
+- Missing configuration sections; invalid model types; broken file paths
+- Conflicting configuration options; malformed task definitions
+- Advanced features disabled: graceful fallback behavior
 
-### 4.2 Data — `data/dataset.py`
+### 4.2 Data — `data/dataset.py` (Currently Missing - Needs Implementation)
 
 AbstractCoralscapesDataset:
-- `_load_data` protocol honored by concrete subclasses (mocked or via fixtures)
+- Data source flexibility: HuggingFace Hub vs local files
+- PDS training path prioritization: fallback behavior when PDS unavailable
+- `_load_data` protocol: consistent image/mask loading across sources
 
 CoralscapesMTLDataset:
 - `__getitem__` returns expected keys: `image`, `image_id`, `original_mask`, `masks`
-- Shapes/types correct; masks dict contains configured tasks only
+- Task-specific mask generation: proper splitter integration
+- Shapes/types validation: tensor dtypes, spatial dimensions preserved
 
 CoralscapesDataset (baseline):
-- `__getitem__` returns expected keys, including single `mask`
+- `__getitem__` returns expected keys: `image`, `image_id`, `original_mask`, `mask`
+- Flattened mask creation: correct mapping via BaseTaskSplitter
+
+Data Source Integration:
+- HuggingFace dataset loading: proper split handling
+- Local file system: path validation, missing file handling
+- PDS patch integration: training set override, validation/test fallback
 
 Acceptance:
 - Label transformation aligns with `TaskSplitter` mappings
+- Data source switching works transparently
+- Augmentation integration preserves spatial alignment
 
 Edge cases:
-- Ignore index handling; empty/single‑class tiles; missing PDS path fallback
+- Missing data sources; corrupted images/masks; ignore index handling
+- Empty/single‑class tiles; extreme aspect ratios
+- PDS path misconfiguration: proper fallback to standard splits
+
+**Note**: Dataset tests are currently missing from the test suite and should be implemented to ensure data pipeline reliability.
 
 ### 4.3 Data — `data/augmentations.py`
 
@@ -161,35 +195,59 @@ Edge cases:
 
 CoralMTLLoss:
 - Forward returns dict with component losses and total; decreases under trivial overfit on tiny batch
-- Uncertainty parameters exist and affect weighting when perturbed
+- Configurable weighting strategies properly instantiated and applied
+- Backward compatibility maintained for uncertainty weighting
 
 CoralLoss:
 - Hybrid combination produces finite scalar; respects `ignore_index`
 
+Weighting Strategy Tests:
+- UncertaintyWeighting: learnable parameters update correctly, weights computed from uncertainties
+- NashMTL: equilibrium solution computed, scale invariance verified
+- IMGrad: adaptive blending based on gradient similarity, MGDA solver integration
+
+PCGrad Tests:
+- Gradient projection removes conflicts (negative cosine similarities)
+- Optimizer wrapper maintains original optimizer behavior for non-conflicting gradients
+
 Acceptance:
 - Backward pass succeeds; grads finite; changing inputs changes loss meaningfully
+- Strategy-specific behaviors validated (e.g., Nash equilibrium properties)
 
 Edge cases:
 - Class weights provided; empty foreground; extreme imbalance
+- Solver fallbacks when optional dependencies unavailable
+- Extreme gradient magnitudes and conflict scenarios
 
 ### 4.9 Engine — `engine/metrics.py`
 
 AbstractCoralMetrics and implementations:
-- `reset()` initializes accumulators (CMs, boundary stats, calibration bins)
-- `update(...)` accepts predictions and `predictions_logits` (optional) + `original_targets`/`image_ids`
-- Tier 1 accumulators update correctly on synthetic inputs:
+- `reset()` initializes accumulators (CMs, boundary stats, calibration bins, GPU tensors)
+- `update(...)` accepts predictions and `predictions_logits` (optional) + `original_targets`/`image_ids` + `epoch`
+- Tier 1 GPU accumulators update correctly on synthetic inputs:
   - mIoU for trivial perfect predictions is 1.0; 0.0 for fully wrong
   - Boundary stats reflect expected TP/FP/FN on simple shapes (e.g., squares)
+  - Global Boundary IoU computed across all tasks
   - Calibration metrics:
     - Perfect one‑hot logits on correct class ⇒ low NLL/Brier, ECE≈0
     - Uniform logits ⇒ high NLL/Brier, ECE>0
-- `compute()` returns report with grouped/ungrouped metrics, global metrics, diagnostic errors, and `optimization_metrics` including BIoU and calibration metrics
+- `compute()` returns report with grouped/ungrouped metrics, global metrics, diagnostic errors, and `optimization_metrics` including BIoU, Boundary_F1, and calibration metrics
+- Async storage integration: per-image data streamed to JSONL via AsyncMetricsStorer
+
+CoralMTLMetrics vs CoralMetrics:
+- MTL version handles dictionary predictions, baseline handles single tensor
+- Both support the same Tier 1 metrics and async storage patterns
+- Baseline correctly unrolls flattened predictions for hierarchical evaluation
 
 Acceptance:
 - All expected keys present; values within numeric tolerances
+- GPU tensor operations produce same results as CPU equivalents
+- Async storage doesn't interfere with metric computation
 
 Edge cases:
 - No pixels (all ignore_index); single bin ECE; logits absent ⇒ calibration metrics gracefully skipped or neutral
+- GPU memory constraints handled gracefully
+- Async storage failures don't crash metric computation
 
 ### 4.10 Engine — `engine/optimizer.py`
 
@@ -282,6 +340,55 @@ Acceptance:
 
 Edge cases:
 - Missing optional packages (mark `@pytest.mark.optdeps` if needed)
+
+### 4.17 Advanced Metrics — `metrics/metrics_storer.py` (Three-Tier System)
+
+AdvancedMetricsProcessor (Tier 2/3):
+- Lifecycle management: `start()`, `shutdown()`, graceful termination
+- Job dispatch: `dispatch_image_job()` with uint8 masks, non-blocking enqueue
+- Worker pool management: configurable CPU workers, task-gated execution
+- Output streaming: dedicated writer process, JSONL format per image
+- Optional dependency handling: graceful degradation when packages missing
+
+MetricsStorer and AsyncMetricsStorer:
+- File I/O: history.json updates, JSONL streaming, final report generation
+- Async operations: non-blocking per-image storage, queue-based buffering
+- Path management: validation vs test file separation, proper cleanup
+
+Acceptance:
+- No process leaks after shutdown; all jobs processed; JSONL well-formed
+- Task gating works (disabled metrics not computed/stored)
+- Concurrent access safe (writer process handles queue properly)
+
+Edge cases:
+- High-volume dispatch doesn't deadlock; missing dependencies handled gracefully
+- Worker process failures isolated; queue overflow behavior defined
+
+### 4.18 Engine — Advanced Training Components
+
+PCGrad optimizer wrapper:
+- Gradient projection: conflicts removed, beneficial directions preserved
+- Optimizer compatibility: works with AdamW, maintains state correctly
+- Reduction modes: mean, sum aggregation options
+
+Gradient Strategies (IMGrad, NashMTL):
+- Update computation: proper gradient collection, solver integration
+- Diagnostic logging: gradient norms, cosine similarities, convergence metrics
+- Solver fallbacks: graceful degradation when optional solvers unavailable
+
+Trainer Integration:
+- Strategy detection: loss-based vs gradient-based strategy routing
+- Mixed precision compatibility: strategies work with autocast/gradscaler
+- Diagnostic persistence: strategy metrics logged to loss_diagnostics.jsonl
+
+Acceptance:
+- Strategies reduce conflicts (measured via cosine similarity improvements)
+- Training convergence maintained or improved vs baseline uncertainty weighting
+- Diagnostic outputs well-formatted and informative
+
+Edge cases:
+- Gradient computation failures handled; extreme magnitude scenarios
+- Optional solver absence doesn't crash training; fallback methods work
 
 ---
 
@@ -400,7 +507,55 @@ task_definitions:
 - Loss components properly weighted and finite
 - Memory usage remains reasonable (< 2GB for test)
 
-#### 5.4.2 Concurrent Metrics Processor Stress Test
+#### 5.4.2 Advanced MTL Strategy Integration Tests
+
+**Test**: `test_mtl_weighting_strategies_integration`
+
+**Strategies Tested**:
+
+A. **Uncertainty Weighting** (Baseline):
+```yaml
+loss:
+  weighting_strategy:
+    type: "Uncertainty"
+```
+
+B. **Nash-MTL** (Scale-Invariant Fairness):
+```yaml
+loss:
+  weighting_strategy:
+    type: "NashMTL"
+    params:
+      update_frequency: 5
+      solver: "cvxopt"  # with fallback testing
+```
+
+C. **IMGrad** (Adaptive Blending):
+```yaml
+loss:
+  weighting_strategy:
+    type: "IMGrad"
+    params:
+      update_frequency: 1
+```
+
+D. **PCGrad Integration**:
+```yaml
+optimizer:
+  use_pcgrad_wrapper: true
+trainer:
+  pcgrad:
+    enabled: true
+```
+
+**Acceptance**:
+- All strategies train without crashing
+- Diagnostic outputs show strategy-specific behaviors
+- Gradient conflict reduction measurable for PCGrad
+- Nash equilibrium properties verified for NashMTL
+- Fallback mechanisms work when optional solvers unavailable
+
+#### 5.4.3 Concurrent Metrics Processor Stress Test
 
 **Test**: `test_advanced_metrics_processor_integration`
 
@@ -677,7 +832,62 @@ underconfident_logits = torch.tensor([0.1, 0.1, 0.1])     # Very uncertain
 
 ---
 
-## 6. Data & Synthetic Fixtures
+## 6. Dataset and Data Pipeline Tests
+
+### 6.1 Core Dataset Component Tests
+
+**Test Files**:
+- `tests/coral_mtl_tests/data/test_coralscapes_mtl.py`
+- `tests/coral_mtl_tests/data/test_task_splitter.py`
+- `tests/coral_mtl_tests/data/test_augmentation.py`
+
+#### 6.1.1 CoralscapesMTLDataset Tests
+
+**Core Functionality**:
+- Dataset initialization with valid/invalid configurations
+- Image and mask loading from file paths
+- Split handling (train/validation/test)
+- Augmentation integration and isolation
+- Memory efficiency and caching behavior
+
+**Task Integration**:
+- MTL task splitter produces hierarchical outputs
+- Baseline task splitter produces flattened outputs
+- Dynamic task definition updates propagate correctly
+- Edge cases: missing labels, unknown classes, boundary conditions
+
+#### 6.1.2 Task Splitter Tests
+
+**MTLTaskSplitter**:
+- Hierarchical label mapping from `task_definitions.yaml`
+- Primary vs auxiliary task distinction
+- Genus and health task output validation
+- Fish, human_artifacts, substrate auxiliary outputs
+
+**BaseTaskSplitter**:
+- Flattened label space creation
+- Single-task compatibility for baseline models
+- Consistent class counting across configurations
+
+### 6.2 DataLoader Integration Tests
+
+**Test File**: `tests/coral_mtl_tests/engine/test_dataloader_integration.py`
+
+**Pipeline Validation**:
+- Batch construction with correct tensor shapes (N,C,H,W)
+- Data type consistency (float32 images, appropriate label dtypes)
+- Memory management across different batch sizes
+- Device placement compatibility with model requirements
+
+**Model Compatibility**:
+- MTL model receives dictionary of task-specific labels
+- Baseline model receives single flattened label tensor
+- Augmentation applied only to training data
+- Correct tensor dimensions for all supported architectures
+
+---
+
+## 7. Data & Synthetic Fixtures
 
 - Small masks with simple shapes (filled squares/rectangles) to test BIoU and IoU
 - Logits contrived for calibration extremes (perfect one‑hot; uniform random)
@@ -687,7 +897,7 @@ Provide factories to generate batches consistently across tests.
 
 ---
 
-## 7. Coverage Targets and CI
+## 8. Coverage Targets and CI
 
 - Line coverage goal: 85%+ overall; critical modules 90%+
 - Branch coverage preferred for metrics and losses
@@ -698,7 +908,7 @@ Optional local performance tip: enable `pytest-xdist` to parallelize CPU‑bound
 
 ---
 
-## 8. Traceability to Specifications
+## 9. Traceability to Specifications
 
 - Technical Spec Section 5 (Engine) ⇄ Losses, Metrics, Inference, Trainer/Evaluator tests
 - Technical Spec Section 6 (Utils) ⇄ TaskSplitter, MetricsStorer, Visualization tests
@@ -709,7 +919,7 @@ This mapping ensures that verification covers both implementation contracts and 
 
 ---
 
-## 9. Running Tests
+## 10. Running Tests
 
 Basic:
 
@@ -736,7 +946,7 @@ pytest -vv --durations=15
 
 ---
 
-## 10. Maintenance Guidelines
+## 11. Maintenance Guidelines
 
 - Add tests with any public API change (new args/returns)
 - Keep synthetic fixtures small and deterministic

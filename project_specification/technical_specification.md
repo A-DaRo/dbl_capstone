@@ -15,9 +15,10 @@ The Coral-MTL project follows a factory-based architecture pattern centered arou
 ```
 coral-mtl-project/
 ├── configs/                         # YAML configuration files for experiments
-├── data/                            # Raw and processed datasets
+├── data/                            # Raw and processed datasets (external)
 ├── notebooks/                       # Jupyter notebooks for exploration and analysis
-├── scripts/                         # Standalone utility scripts
+├── pds_launcher/                    # Poisson Disk Sampling dataset generation
+├── project_specification/           # Comprehensive documentation
 ├── src/coral_mtl/                   # Core installable Python package
 │   ├── ExperimentFactory.py         # Central orchestrator and dependency injector
 │   ├── data/                        # Data loading and processing
@@ -32,11 +33,13 @@ coral-mtl-project/
 │   │   ├── trainer.py               # Training orchestration with mixed precision
 │   │   ├── evaluator.py             # Comprehensive testing pipeline
 │   │   ├── losses.py                # Multi-task and baseline loss functions
-│   │   ├── optimizer.py             # Optimizer and scheduler factory
-│   │   └── inference.py             # Sliding window inference engine
-│   ├── metrics/                     # Metrics calculation and persistence
-│   │   ├── metrics.py               # Hierarchical metrics calculation
-│   │   └── metrics_storer.py        # Metrics persistence and storage
+│   │   ├── loss_weighting.py        # Multi-task weighting strategies
+│   │   ├── gradient_strategies.py   # Advanced gradient manipulation (NashMTL, IMGrad)
+│   │   ├── pcgrad.py                # PCGrad optimizer wrapper
+│   │   └── optimizer.py             # Optimizer and scheduler factory
+│   ├── metrics/                     # Three-tier metrics system
+│   │   ├── metrics.py               # Tier 1: Real-time GPU metrics calculation
+│   │   └── metrics_storer.py        # Tier 2/3: Async CPU processing and storage
 │   ├── scripts/                     # Data processing and analysis scripts
 │   │   ├── analyze_patch_distribution.py    # Statistical analysis utilities
 │   │   ├── compare_distributions.py         # Distribution comparison tools
@@ -46,7 +49,7 @@ coral-mtl-project/
 │   └── utils/                       # Supporting utilities
 │       ├── task_splitter.py         # Task definition parsing and mapping
 │       └── visualization.py         # Comprehensive plotting and analysis
-├── tests/                           # Unit and integration tests
+├── tests/coral_mtl_tests/           # Comprehensive test suite mirroring src/ structure
 └── experiments/                     # Output directory for all training artifacts
 ```
 
@@ -80,11 +83,12 @@ class ExperimentFactory:
     def get_loss_function(self) -> nn.Module
     def get_metrics_calculator(self) -> AbstractCoralMetrics
     def get_metrics_storer(self) -> MetricsStorer
+    def get_advanced_metrics_processor(self) -> Optional[AdvancedMetricsProcessor]
     
     # Workflow Orchestration Methods
-    def run_training(self, trial: Optional[optuna.Trial] = None) -> Tuple[Dict, Dict]
+    def run_training(self, trial: Optional[optuna.Trial] = None) -> None
     def run_evaluation(self, checkpoint_path: Optional[str] = None) -> Dict[str, Any]
-    def run_hyperparameter_study(self)
+    def run_hyperparameter_study(self) -> None
 ```
 
 ### 2.2. Pipeline Execution Flow
@@ -145,8 +149,12 @@ class AbstractCoralscapesDataset(Dataset, ABC):
 class CoralscapesMTLDataset(AbstractCoralscapesDataset):
     """Dataset for Multi-Task Learning models driven by MTLTaskSplitter."""
     
-    def __init__(self, splitter: MTLTaskSplitter, **kwargs):
-        """Initialize with MTL task splitter for multi-channel ground truth."""
+    def __init__(self, splitter: MTLTaskSplitter, split: str, patch_size: int,
+                 augmentations: Optional[SegmentationAugmentation] = None,
+                 hf_dataset_name: Optional[str] = None,
+                 data_root_path: Optional[str] = None,
+                 pds_train_path: Optional[str] = None):
+        """Initialize with MTL task splitter and flexible data source configuration."""
         
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         """Returns:
@@ -165,8 +173,12 @@ class CoralscapesMTLDataset(AbstractCoralscapesDataset):
 class CoralscapesDataset(AbstractCoralscapesDataset):
     """Dataset for baseline single-head models driven by BaseTaskSplitter."""
     
-    def __init__(self, splitter: BaseTaskSplitter, **kwargs):
-        """Initialize with baseline task splitter for flattened ground truth."""
+    def __init__(self, splitter: BaseTaskSplitter, split: str, patch_size: int,
+                 augmentations: Optional[SegmentationAugmentation] = None,
+                 hf_dataset_name: Optional[str] = None,
+                 data_root_path: Optional[str] = None,
+                 pds_train_path: Optional[str] = None):
+        """Initialize with baseline task splitter and flexible data source configuration."""
         
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         """Returns:
@@ -302,28 +314,31 @@ class MultiTaskCrossAttentionModule(nn.Module):
 
 ```python
 class Trainer:
-    """Generic training and validation engine with mixed precision support."""
+    """Generic training and validation engine with mixed precision and three-tier metrics support."""
     
     def __init__(self, model, train_loader, val_loader, loss_fn,
                  metrics_calculator: AbstractCoralMetrics,
                  metrics_storer: MetricsStorer, optimizer, scheduler,
-                 config, trial: optuna.Trial = None):
-        """Initialize with all training components and optional Optuna integration."""
+                 config, trial: optuna.Trial = None,
+                 metrics_processor: AdvancedMetricsProcessor = None):
+        """Initialize with all training components and optional Tier 2/3 metrics processor."""
         
     def train(self):
         """Main training loop with epoch management, validation, and checkpointing."""
         
     def _train_one_epoch(self):
-        """Execute single training epoch with gradient accumulation."""
+        """Execute single training epoch with gradient accumulation and strategy support."""
         
     def _validate_one_epoch(self, epoch: int = None) -> Dict[str, Any]:
-        """Execute validation with sliding window inference and metrics storage."""
+        """Execute validation with sliding window inference and dual-tier metrics dispatch."""
 ```
 
 #### Training Features:
 - **Mixed Precision**: Automatic mixed precision with gradient scaling
+- **Advanced Gradient Strategies**: Support for NashMTL, IMGrad, PCGrad, and uncertainty weighting
 - **Gradient Accumulation**: Support for effective batch sizes larger than memory allows
-- **Sliding Window Validation**: Full-resolution validation inference
+- **Three-Tier Metrics Integration**: Concurrent real-time and advanced metrics computation
+- **Sliding Window Validation**: Full-resolution validation inference with dual-tier dispatch
 - **Optuna Integration**: Built-in support for hyperparameter optimization with pruning
 - **Comprehensive Logging**: Detailed loss component tracking and metrics storage
 
@@ -331,34 +346,40 @@ class Trainer:
 
 ```python
 class Evaluator:
-    """Comprehensive final evaluation pipeline for test set assessment."""
+    """Comprehensive final evaluation pipeline with three-tier metrics support."""
     
     def __init__(self, model: torch.nn.Module, test_loader: torch.utils.data.DataLoader,
                  metrics_calculator: AbstractCoralMetrics,
-                 metrics_storer: MetricsStorer, config: object):
-        """Initialize evaluation components."""
+                 metrics_storer: MetricsStorer, config: object,
+                 metrics_processor: Optional[AdvancedMetricsProcessor] = None,
+                 loss_fn: Optional[torch.nn.Module] = None):
+        """Initialize evaluation components with optional Tier 2/3 processor."""
         
     def evaluate(self) -> Dict[str, Any]:
-        """Execute complete testing pipeline with sliding window inference."""
+        """Execute complete testing pipeline with dual-tier metrics computation."""
 ```
 
 #### Evaluation Features:
 - **Checkpoint Loading**: Automatic best model loading
 - **Sliding Window Inference**: Memory-efficient full-resolution prediction
+- **Three-Tier Metrics**: Real-time GPU metrics plus comprehensive CPU analysis
 - **Comprehensive Metrics**: Hierarchical evaluation across all task levels
+- **Advanced Analytics**: Surface distance, clustering, and panoptic metrics
 - **Result Persistence**: Detailed storage of per-image results and final reports
 
 ### 5.3. Loss Functions
 
 ```python
 class CoralMTLLoss(nn.Module):
-    """Complete multi-task loss with hierarchical uncertainty weighting."""
+    """Complete multi-task loss with configurable weighting strategies."""
     
     def __init__(self, num_classes: Dict[str, int],
-                 class_weights: Optional[Dict[str, torch.Tensor]] = None,
+                 primary_tasks: List[str],
+                 aux_tasks: List[str],
+                 weighting_strategy: WeightingStrategy,
                  ignore_index: int = 0, w_consistency: float = 0.1,
                  hybrid_alpha: float = 0.5, focal_gamma: float = 2.0):
-        """Initialize with learnable uncertainty parameters and hybrid loss components."""
+        """Initialize with configurable weighting strategy and hybrid loss components."""
         
     def forward(self, predictions: Dict[str, torch.Tensor],
                 targets: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
@@ -379,9 +400,10 @@ class CoralLoss(nn.Module):
 ```
 
 #### Loss Function Features:
-- **Hierarchical Uncertainty Weighting**: Learnable task-specific uncertainty parameters
+- **Configurable Weighting Strategies**: Uncertainty, NashMTL, IMGrad, and other advanced strategies
 - **Hybrid Loss Components**: Combines Focal/Cross-Entropy with Dice loss
 - **Consistency Regularization**: Penalizes logically inconsistent predictions
+- **Gradient Strategy Integration**: Support for PCGrad and advanced gradient manipulation
 - **Comprehensive Logging**: Returns detailed loss component breakdown
 
 ### 5.4. Optimizer Factory
@@ -400,30 +422,83 @@ def create_optimizer_and_scheduler(
 - **Polynomial Decay**: Stable learning rate schedule with warmup
 - **Transformer-Optimized**: Best practices for SegFormer-based architectures
 
+### 5.5. Multi-Task Weighting Strategies
+
+The system provides sophisticated multi-task learning optimization through configurable weighting strategies:
+
+```python
+class WeightingStrategy(ABC):
+    """Abstract base for multi-task weighting strategies."""
+    
+    @abstractmethod
+    def compute_weights(self, losses: Dict[str, torch.Tensor]) -> Dict[str, float]:
+        """Compute task weights based on current losses."""
+
+class UncertaintyWeighting(WeightingStrategy):
+    """Learnable uncertainty-based task weighting (Kendall & Gal 2017)."""
+
+class NashMTLStrategy(GradientUpdateStrategy):
+    """Nash equilibrium-based multi-task optimization."""
+
+class IMGradStrategy(GradientUpdateStrategy):
+    """Impartial multi-task gradient-based optimization."""
+```
+
+#### Weighting Strategy Features:
+- **Uncertainty Weighting**: Learnable homoscedastic uncertainty parameters
+- **NashMTL**: Scale-invariant Nash equilibrium optimization
+- **IMGrad**: Adaptive gradient blending with cosine similarity
+- **PCGrad Integration**: Gradient projection for conflict reduction
+- **Configurable Selection**: YAML-driven strategy configuration
+
+### 5.6. Advanced Gradient Manipulation
+
+```python
+class PCGrad:
+    """Projecting Conflicting Gradients optimizer wrapper."""
+    
+    def __init__(self, optimizer, reduction: str = 'mean'):
+        """Wrap any PyTorch optimizer with gradient projection."""
+
+class GradientUpdateStrategy(ABC):
+    """Abstract base for gradient-based multi-task optimization."""
+    
+    @abstractmethod
+    def update_step(self, model: nn.Module, losses: Dict[str, torch.Tensor],
+                   optimizer: torch.optim.Optimizer) -> Dict[str, Any]:
+        """Perform gradient-aware parameter update."""
+```
+
 ---
 
 ## 6. Metrics Components: `src/coral_mtl/metrics/`
 
-### 6.1. Metrics Calculation
+### 6.1. Three-Tier Metrics Architecture
+
+The project implements a sophisticated three-tier metrics system that separates real-time GPU computation from comprehensive CPU analysis:
+
+#### Tier 1: Real-Time GPU Metrics Engine
 
 ```python
 class AbstractCoralMetrics(ABC):
-    """Abstract base for hierarchical coral segmentation metrics."""
+    """Abstract base for hierarchical coral segmentation metrics with GPU acceleration."""
     
-    def __init__(self, splitter: TaskSplitter, device: torch.device,
-                 boundary_thickness: int = 2, ignore_index: int = 255):
-        """Initialize with task splitter and boundary IoU parameters."""
+    def __init__(self, splitter: TaskSplitter, storer: MetricsStorer,
+                 device: torch.device, boundary_thickness: int = 2, 
+                 ignore_index: int = 255, use_async_storage: bool = True):
+        """Initialize with task splitter, storage, and GPU acceleration."""
         
     def reset(self):
-        """Reset accumulated statistics for new epoch/run."""
+        """Reset accumulated statistics including GPU tensors for new epoch/run."""
         
     @abstractmethod
     def update(self, predictions: Any, original_targets: torch.Tensor, 
-               image_ids: List[str]):
-        """Update metrics with batch predictions."""
+               image_ids: List[str], epoch: int = None, 
+               predictions_logits: Any = None):
+        """Update metrics with batch predictions and raw logits for calibration."""
         
     def compute(self) -> Dict[str, Any]:
-        """Compute comprehensive metrics report."""
+        """Compute comprehensive metrics report including calibration metrics."""
 
 class CoralMTLMetrics(AbstractCoralMetrics):
     """Multi-task metrics calculator for dictionary-based predictions."""
@@ -432,12 +507,40 @@ class CoralMetrics(AbstractCoralMetrics):
     """Baseline metrics calculator with flattened prediction unrolling."""
 ```
 
-#### Metrics Features:
+#### Tier 2/3: Advanced Asynchronous Processing
+
+```python
+class AdvancedMetricsProcessor:
+    """Multi-process CPU worker pool for comprehensive per-image metrics."""
+    
+    def __init__(self, output_dir: str, num_cpu_workers: int = 30,
+                 enabled_tasks: List[str] = ["ASSD", "HD95", "PanopticQuality", "ARI"]):
+        """Initialize with configurable worker pool and task selection."""
+        
+    def start(self):
+        """Start multiprocessing infrastructure with job queues and workers."""
+        
+    def dispatch_image_job(self, image_id: str, pred_mask: np.ndarray, 
+                          target_mask: np.ndarray):
+        """Non-blocking dispatch of per-image advanced metric computation."""
+        
+    def shutdown(self):
+        """Graceful shutdown with proper resource cleanup."""
+```
+
+#### Tier 1 Metrics Features:
+- **Real-Time GPU Computation**: Confusion matrices, Boundary IoU, calibration metrics
+- **Probabilistic Metrics**: NLL, Brier Score, Expected Calibration Error (ECE)
 - **Hierarchical Evaluation**: Computes metrics at both grouped and ungrouped task levels
-- **Boundary IoU**: Specialized boundary-aware IoU calculation
-- **Per-Image Storage**: Detailed confusion matrix storage for analysis
 - **Global Metrics**: Unified metrics across all classes for comprehensive comparison
 - **TIDE-Inspired Error Analysis**: Classification, background, and missed error decomposition
+
+#### Tier 2/3 Advanced Metrics Features:
+- **Surface Distance Metrics**: ASSD, HD95 using scipy distance transforms
+- **Clustering Metrics**: Adjusted Rand Index (ARI), Variation of Information
+- **Panoptic Metrics**: Per-image Panoptic Quality (PQ) component computation
+- **Asynchronous Processing**: Non-blocking CPU computation with 30+ worker pool
+- **JSONL Streaming**: Per-image results streamed for post-processing analysis
 
 ### 6.2. Metrics Storage & Persistence
 
@@ -599,7 +702,136 @@ The scripts directory contains utility scripts for data processing and analysis:
 
 ---
 
-## 9. Configuration-Driven Architecture
+## 9. Configuration System & Advanced Features
+
+### 9.1. Comprehensive Configuration Schema
+
+The system uses YAML configuration files to control all aspects of model training and evaluation. The ExperimentFactory reads these configurations and instantiates components accordingly.
+
+#### Core Configuration Structure
+
+```yaml
+# Model Architecture Configuration
+model:
+  type: "CoralMTL"  # or "SegFormerBaseline"
+  params:
+    backbone: "nvidia/mit-b2"
+    decoder_channel: 256
+    attention_dim: 256
+  tasks:
+    primary: ["genus", "health"]
+    auxiliary: ["fish", "human_artifacts", "substrate"]
+
+# Data Pipeline Configuration
+data:
+  dataset_name: "EPFL-ECEO/coralscapes"
+  task_definitions_path: "configs/task_definitions.yaml"
+  patch_size: 512
+  batch_size_per_gpu: 4
+  num_workers: 4
+  # Optional: PDS training data override
+  pds_train_path: "./dataset/processed/pds_patches/"
+  data_root_path: "./dataset/"
+
+# Loss Function Configuration
+loss:
+  type: "CompositeHierarchical"
+  params:
+    w_consistency: 0.1
+    hybrid_alpha: 0.5
+    focal_gamma: 2.0
+    ignore_index: 0
+  # Advanced: Multi-task weighting strategy
+  weighting_strategy:
+    type: "NashMTL"  # "Uncertainty", "IMGrad", etc.
+    params:
+      update_frequency: 10
+
+# Optimization Configuration
+optimizer:
+  type: "AdamWPolyDecay"
+  params:
+    lr: 6e-5
+    weight_decay: 0.01
+    warmup_ratio: 0.1
+    power: 1.0
+  # Optional: PCGrad integration
+  use_pcgrad_wrapper: false
+
+# Three-Tier Metrics Configuration
+metrics_processor:
+  enabled: true
+  num_cpu_workers: 30
+  tasks: ["ASSD", "HD95", "PanopticQuality", "ARI"]
+
+# Training Configuration
+trainer:
+  epochs: 100
+  device: "auto"
+  output_dir: "experiments/experiment_name"
+  model_selection_metric: "optimization_metrics.H-Mean"
+  gradient_accumulation_steps: 1
+  use_mixed_precision: true
+  inference_stride: 256
+  inference_batch_size: 16
+
+# Evaluation Configuration
+evaluator:
+  checkpoint_path: null  # Auto-detect from trainer.output_dir
+  output_dir: null       # Auto-set to trainer.output_dir/evaluation
+  inference_stride: 256
+  inference_batch_size: 16
+
+# Hyperparameter Study Configuration
+study:
+  name: "coral_mtl_study"
+  storage: "sqlite:///study.db"
+  config_path: "configs/search_space.yaml"
+  n_trials: 50
+  direction: "maximize"
+  pruner:
+    type: "MedianPruner"
+    params:
+      n_warmup_steps: 5
+```
+
+### 9.2. Advanced Configuration Features
+
+#### Multi-Task Weighting Strategy Configuration
+
+```yaml
+loss:
+  weighting_strategy:
+    type: "NashMTL"
+    params:
+      update_frequency: 10
+      solver: "cvxopt"  # Optional: specify solver preference
+```
+
+#### PCGrad Integration
+
+```yaml
+optimizer:
+  use_pcgrad_wrapper: true
+
+trainer:
+  pcgrad:
+    enabled: true
+    reduction: "mean"
+```
+
+#### Three-Tier Metrics System
+
+```yaml
+metrics_processor:
+  enabled: true
+  num_cpu_workers: 30
+  tasks: ["ASSD", "HD95", "PanopticQuality", "ARI", "VariationOfInformation"]
+```
+
+---
+
+## 10. Configuration-Driven Architecture
 
 The system uses YAML configuration files to control all aspects of model training and evaluation. The ExperimentFactory reads these configurations and instantiates components accordingly.
 
@@ -731,9 +963,7 @@ model:
 
 ---
 
-This comprehensive technical specification provides complete documentation of the Coral-MTL system architecture, component interfaces, and extension guidelines. The ExperimentFactory-centered design ensures consistent, reproducible experiments while maintaining flexibility for research and development.
-
-#### 2.1. The Label Transformation Pipeline (`dataset.py`)
+## 11. Two‑Tier Metric Evaluation Architecture
 
 This logic is encapsulated within the `CoralscapesDataset` class, which inherits from `torch.utils.data.Dataset`.
 
@@ -979,9 +1209,9 @@ To add a new task (e.g., "Disease Segmentation") to the model:
 
 ---
 
-## 11. Two‑Tier Metric Evaluation Architecture
+## 11. Three‑Tier Metric Evaluation Architecture
 
-This project implements a concurrent, two‑tier metrics system that separates fast, GPU‑friendly aggregation from expensive CPU‑only analytics. The design minimizes GPU↔CPU transfers, avoids I/O contention, and keeps training/validation loops non‑blocking.
+This project implements a concurrent, three‑tier metrics system that separates fast, GPU‑friendly aggregation from expensive CPU‑only analytics. The design minimizes GPU↔CPU transfers, avoids I/O contention, and keeps training/validation loops non‑blocking.
 
 ### 11.1. Overview
 
@@ -993,7 +1223,7 @@ Key classes and files:
 - Tier 2: `AdvancedMetricsProcessor` in `src/coral_mtl/metrics/metrics_storer.py`
 - Orchestration: `Trainer`, `Evaluator` in `src/coral_mtl/engine/`, and factory wiring in `src/coral_mtl/ExperimentFactory.py`
 
-### 11.2. Tier 1 — GPU Collector
+### 11.2. Tier 1 — Real-Time GPU Collector
 
 Contract:
 - Input per batch: predictions (dict or tensor), original_targets (global mask), image_ids, and optional predictions_logits.

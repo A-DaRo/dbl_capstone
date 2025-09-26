@@ -371,6 +371,17 @@ class AsyncMetricsStorer:
             is_testing = task['is_testing']
             key = 'test' if is_testing else 'val'
             file_handle = self._active_files.get(key)
+            # Lazy-open file handle if open_for_run wasn't called
+            if file_handle is None:
+                path = os.path.join(self.output_dir, "test_cms.jsonl" if is_testing else "validation_cms.jsonl")
+                try:
+                    file_handle = open(path, 'a')
+                    self._active_files[key] = file_handle
+                    if not is_testing and 'loss' not in self._active_files:
+                        self._active_files['loss'] = open(self._loss_diagnostics_path, 'a')
+                except Exception as e:
+                    print(f"AsyncMetricsStorer: failed to open file {path}: {e}")
+                    file_handle = None
             
             if file_handle:
                 # Convert numpy arrays to lists and compute per-image metrics in background thread
@@ -417,6 +428,17 @@ class AsyncMetricsStorer:
             is_testing = task['is_testing']
             key = 'test' if is_testing else 'val'
             file_handle = self._active_files.get(key)
+            # Lazy-open file handle if open_for_run wasn't called
+            if file_handle is None:
+                path = os.path.join(self.output_dir, "test_cms.jsonl" if is_testing else "validation_cms.jsonl")
+                try:
+                    file_handle = open(path, 'a')
+                    self._active_files[key] = file_handle
+                    if not is_testing and 'loss' not in self._active_files:
+                        self._active_files['loss'] = open(self._loss_diagnostics_path, 'a')
+                except Exception as e:
+                    print(f"AsyncMetricsStorer: failed to open file {path}: {e}")
+                    file_handle = None
             
             if file_handle:
                 confusion_matrices = task['confusion_matrices']

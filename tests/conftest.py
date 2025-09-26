@@ -12,12 +12,34 @@ import os
 import tempfile
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
+import copy
 
 import numpy as np
 import pytest
 import torch
 import yaml
 from unittest.mock import MagicMock, patch
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--run-parameter-coverage",
+        action="store_true",
+        default=False,
+        help="Run the exhaustive ExperimentFactory parameter coverage suite.",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--run-parameter-coverage"):
+        return
+
+    skip_marker = pytest.mark.skip(
+        reason="Use --run-parameter-coverage to enable ExperimentFactory parameter coverage tests.",
+    )
+    for item in items:
+        if "parameter_coverage" in item.keywords:
+            item.add_marker(skip_marker)
 
 
 # Default to CPU-only execution for tests unless the user explicitly exposes GPUs.
@@ -514,11 +536,71 @@ def window_stride_pairs():
     return [([32, 32], [16, 16]), ([64, 64], [32, 32])]
 
 
+CONFIG_SECTION_NAMES: Tuple[str, ...] = (
+    'model',
+    'data',
+    'augmentations',
+    'loss',
+    'optimizer',
+    'metrics',
+    'trainer',
+    'evaluator',
+    'metrics_processor',
+)
+
+
+@pytest.fixture(scope="session")
+def factory_config_section_catalog(base_config_paths) -> Dict[str, Dict[str, Any]]:
+    """Load baseline and MTL configs into a session cache keyed by config type."""
+    catalog: Dict[str, Dict[str, Any]] = {}
+    for name, path in base_config_paths.items():
+        catalog[name] = _load_yaml(path)
+    return catalog
+
+
+@pytest.fixture(params=('baseline', 'mtl'))
+def factory_config_kind(request):
+    """Parametrize over baseline and MTL factory configurations."""
+    return request.param
+
+
+@pytest.fixture(params=CONFIG_SECTION_NAMES)
+def factory_section_name(request):
+    """Iterate across all documented configuration sections."""
+    return request.param
+
+
+@pytest.fixture
+def factory_section_config(factory_config_kind, factory_section_name, factory_config_section_catalog):
+    """Provide a config section dict for the requested config kind and section."""
+    config_dict = copy.deepcopy(factory_config_section_catalog[factory_config_kind])
+    section = config_dict.get(factory_section_name)
+    if section is None:
+        pytest.skip(f"Section '{factory_section_name}' unavailable for config '{factory_config_kind}'")
+    return factory_config_kind, factory_section_name, section
+
+
+@pytest.fixture
+def experiment_config_bundle(factory_config_kind, tmp_path, base_config_paths, task_definitions_path_default):
+    """Return (config_kind, config_dict, config_path) ready for ExperimentFactory use."""
+    base_cfg = _load_yaml(base_config_paths[factory_config_kind])
+    config_path = _prepare_config_variant(
+        tmp_path,
+        base_cfg,
+        run_name=f"{factory_config_kind}_bundle",
+        task_defs_path=task_definitions_path_default
+    )
+    config_dict = _load_yaml(config_path)
+    return factory_config_kind, config_dict, config_path
+
+
 __all__ = [
     'device', 'splitter_mtl', 'splitter_base', 'dummy_images', 'dummy_masks',
     'dummy_single_mask', 'minimal_coral_mtl_model', 'minimal_baseline_model',
     'baseline_config_yaml', 'mtl_config_yaml', 'mtl_config_yaml_param', 'mtl_variant_config',
-    'extreme_lr_variants', 'tiny_batch_variants', 'window_stride_pairs'
+    'extreme_lr_variants', 'tiny_batch_variants', 'window_stride_pairs',
+    'factory_section_config', 'factory_section_name', 'factory_config_kind',
+    'experiment_config_bundle'
 ]
 
 ################################################################################

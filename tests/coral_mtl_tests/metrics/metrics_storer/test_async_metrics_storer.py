@@ -226,3 +226,37 @@ class TestAsyncMetricsStorer:
         assert record["step"] == 42
         assert record["epoch"] == 3
         assert record["task_weights"]["genus"] == pytest.approx(0.5)
+
+    def test_lazy_open_without_explicit_open_for_run(self, tmp_path: Path) -> None:
+        """
+        Regression test: Even if open_for_run() is never called, the async storer
+        must lazily open output files upon first write and persist records.
+        """
+        storer = AsyncMetricsStorer(output_dir=str(tmp_path))
+        try:
+            cm = {"task": np.array([[1, 2], [3, 4]], dtype=np.int64)}
+            # Write to validation without prior open_for_run
+            storer.store_per_image_cms("img_val_lazy", cm, is_testing=False, epoch=11)
+            # Write to test without prior open_for_run
+            storer.store_per_image_cms("img_test_lazy", cm, is_testing=True, epoch=22)
+            storer.wait_for_completion()
+
+            val_path = tmp_path / "validation_cms.jsonl"
+            test_path = tmp_path / "test_cms.jsonl"
+
+            assert val_path.exists(), "validation_cms.jsonl should be created lazily."
+            assert test_path.exists(), "test_cms.jsonl should be created lazily."
+
+            val_lines = val_path.read_text().strip().splitlines()
+            test_lines = test_path.read_text().strip().splitlines()
+            assert len(val_lines) >= 1
+            assert len(test_lines) >= 1
+
+            vrec = json.loads(val_lines[-1])
+            trec = json.loads(test_lines[-1])
+            assert vrec["image_id"] == "img_val_lazy"
+            assert vrec["epoch"] == 11
+            assert trec["image_id"] == "img_test_lazy"
+            assert trec["epoch"] == 22
+        finally:
+            storer.shutdown()

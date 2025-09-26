@@ -1,17 +1,21 @@
-"""Component instantiation tests for `ExperimentFactory` getters."""
+"""Component instantiation tests for `ExperimentFactory` getters with parameter coverage."""
 
 from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
+
 from unittest.mock import patch
 
 from coral_mtl.ExperimentFactory import ExperimentFactory
 from coral_mtl.model.core import BaselineSegformer, CoralMTLModel
 from coral_mtl.metrics.metrics import CoralMetrics, CoralMTLMetrics
+from coral_mtl.metrics.metrics_storer import MetricsStorer
 from coral_mtl.engine.losses import CoralLoss, CoralMTLLoss
 from coral_mtl.engine.loss_weighting import (
     UncertaintyWeightingStrategy,
@@ -32,83 +36,217 @@ class _DummyLoader:
             yield None
 
 
-@pytest.fixture
-def dummy_loaders():
-    loader = _DummyLoader()
-    return {'train': loader, 'validation': loader, 'test': loader}
-
-
-@pytest.fixture
-def mtl_uncertainty_config(factory_config_dict_mtl: dict) -> dict:
-    cfg = copy.deepcopy(factory_config_dict_mtl)
-    cfg.setdefault('loss', {})['weighting_strategy'] = {'type': 'Uncertainty'}
-    cfg.setdefault('optimizer', {})['use_pcgrad_wrapper'] = False
+def _prepare_config(config_dict: dict) -> dict:
+    """Return a deep copy of the config with safe defaults for testing."""
+    cfg = copy.deepcopy(config_dict)
     cfg.setdefault('metrics_processor', {})['enabled'] = False
+    cfg.setdefault('data', {}).setdefault('num_workers', 0)
     return cfg
 
 
-def test_factory_builds_baseline_components(baseline_config_yaml, dummy_loaders):
-    factory = ExperimentFactory(config_path=str(baseline_config_yaml))
+@pytest.mark.parametrize('factory_section_name', ['model'], indirect=True)
+def test_get_model_aligns_with_task_definitions(factory_section_config, experiment_config_bundle):
+    config_kind, section_name, section = factory_section_config
+    bundle_kind, config_dict, _ = experiment_config_bundle
+    assert config_kind == bundle_kind
 
+    cfg = _prepare_config(config_dict)
+    factory = ExperimentFactory(config_dict=cfg)
     model = factory.get_model()
-    loss_fn = factory.get_loss_function()
-    with patch.object(factory, 'get_dataloaders', return_value=dummy_loaders):
-        optimizer, _ = factory.get_optimizer_and_scheduler()
-    metrics = factory.get_metrics_calculator()
 
-    assert isinstance(model, BaselineSegformer)
-    assert isinstance(loss_fn, CoralLoss)
-    assert isinstance(optimizer, torch.optim.AdamW)
-    assert isinstance(metrics, CoralMetrics)
-
-
-def test_factory_builds_mtl_components(mtl_uncertainty_config, dummy_loaders):
-    factory = ExperimentFactory(config_dict=mtl_uncertainty_config)
-
-    model = factory.get_model()
-    loss_fn = factory.get_loss_function()
-    metrics = factory.get_metrics_calculator()
-
-    assert isinstance(model, CoralMTLModel)
-    assert isinstance(loss_fn, CoralMTLLoss)
-    assert isinstance(loss_fn.weighting_strategy, UncertaintyWeightingStrategy)
-    assert isinstance(metrics, CoralMTLMetrics)
+    model.eval()  # Set to eval mode to avoid BatchNorm issues with small tensors
+    
+    if config_kind == 'mtl':
+        assert isinstance(model, CoralMTLModel)
+        expected_tasks = cfg['model']['tasks']['primary'] + cfg['model']['tasks']['auxiliary']
+        dummy_images = torch.rand(1, 3, 128, 128)  # Larger tensor to avoid BatchNorm issues
+        outputs = model(dummy_images)
+        assert set(outputs.keys()) == set(expected_tasks)
+        for task, logits in outputs.items():
+            expected_classes = len(factory.task_splitter.hierarchical_definitions[task]['ungrouped']['id2label'])
+            assert logits.shape[1] == expected_classes
+    else:
+        assert isinstance(model, BaselineSegformer)
+        dummy_images = torch.rand(1, 3, 128, 128)  # Larger tensor to avoid BatchNorm issues
+        outputs = model(dummy_images)
+        expected_classes = len(factory.task_splitter.global_id2label)
+        assert outputs.shape[1] == expected_classes
 
 
-@pytest.mark.parametrize(
-    "strategy_type,expected_cls,params",
-    [
-        ("Uncertainty", UncertaintyWeightingStrategy, {}),
-        ("IMGrad", IMGradStrategy, {'params': {'solver': 'pgd'}}),
-        ("NashMTL", NashMTLStrategy, {'params': {'solver': 'iterative', 'update_frequency': 3}}),
-    ],
-)
-def test_factory_builds_correct_strategy(strategy_type, expected_cls, params, factory_config_dict_mtl, dummy_loaders):
-    cfg = copy.deepcopy(factory_config_dict_mtl)
-    cfg.setdefault('loss', {})['weighting_strategy'] = {'type': strategy_type, **params}
-    cfg.setdefault('optimizer', {})['use_pcgrad_wrapper'] = False
-    cfg.setdefault('metrics_processor', {})['enabled'] = False
+@pytest.mark.parametrize('factory_section_name', ['data'], indirect=True)
+def test_get_dataloaders_selects_correct_dataset(factory_section_config, experiment_config_bundle):
+    config_kind, _, _ = factory_section_config
+    bundle_kind, config_dict, _ = experiment_config_bundle
+    assert config_kind == bundle_kind
+
+    cfg = _prepare_config(config_dict)
+    cfg['data'].setdefault('batch_size_per_gpu', cfg['data'].get('batch_size', 1))
+
+    dataset_module_path = (
+        'coral_mtl.ExperimentFactory.CoralscapesMTLDataset'
+        if config_kind == 'mtl'
+        else 'coral_mtl.ExperimentFactory.CoralscapesDataset'
+    )
+
+    created_splits = []
+
+    class DummyDataset:
+        def __init__(self, split, **_):
+            self.split = split
+
+        def __len__(self):
+            return 1
+
+        def __getitem__(self, idx):
+            return {'image': torch.zeros(3, 32, 32), 'mask': torch.zeros(32, 32)}
+
+    def dataset_constructor(*args, **kwargs):
+        created_splits.append(kwargs['split'])
+        return DummyDataset(split=kwargs['split'])
+
+    def dataloader_constructor(dataset, **kwargs):
+        return SimpleNamespace(dataset=dataset, kwargs=kwargs)
+
+    with patch(dataset_module_path, side_effect=dataset_constructor) as dataset_mock, \
+            patch('coral_mtl.ExperimentFactory.DataLoader', side_effect=dataloader_constructor), \
+            patch('coral_mtl.ExperimentFactory.SegmentationAugmentation', autospec=True):
+        factory = ExperimentFactory(config_dict=cfg)
+        loaders = factory.get_dataloaders()
+
+    assert dataset_mock.call_count == 3
+    assert created_splits == ['train', 'validation', 'test']
+    assert set(loaders.keys()) == {'train', 'validation', 'test'}
+    for split, loader in loaders.items():
+        assert isinstance(loader.dataset, DummyDataset)
+        assert loader.dataset.split == split
+
+
+@pytest.mark.parametrize('factory_section_name', ['optimizer'], indirect=True)
+@pytest.mark.parametrize('use_pcgrad', [False, True])
+def test_get_optimizer_and_scheduler_toggle_pcgrad(factory_section_config, experiment_config_bundle, use_pcgrad):
+    config_kind, _, _ = factory_section_config
+    bundle_kind, config_dict, _ = experiment_config_bundle
+    assert config_kind == bundle_kind
+
+    cfg = _prepare_config(config_dict)
+    cfg['optimizer']['use_pcgrad_wrapper'] = use_pcgrad
+    cfg['trainer']['epochs'] = 2
 
     factory = ExperimentFactory(config_dict=cfg)
+    dummy_loader = _DummyLoader(length=3)
+    loaders = {'train': dummy_loader, 'validation': dummy_loader, 'test': dummy_loader}
 
+    with patch.object(factory, 'get_dataloaders', return_value=loaders):
+        optimizer, scheduler = factory.get_optimizer_and_scheduler()
+
+    if use_pcgrad:
+        assert isinstance(optimizer, PCGrad)
+    else:
+        assert isinstance(optimizer, torch.optim.AdamW)
+    assert scheduler is not None
+    # Cached tuple should be reused
+    with patch.object(factory, 'get_dataloaders', side_effect=AssertionError("should use cache")):
+        cached_optimizer, cached_scheduler = factory.get_optimizer_and_scheduler()
+    assert optimizer is cached_optimizer
+    assert scheduler is cached_scheduler
+
+
+@pytest.mark.parametrize('factory_section_name', ['loss'], indirect=True)
+def test_get_loss_function_baseline_returns_hybrid(factory_section_config, experiment_config_bundle):
+    config_kind, _, _ = factory_section_config
+    if config_kind != 'baseline':
+        pytest.skip('Baseline-only assertion')
+
+    _, config_dict, _ = experiment_config_bundle
+    cfg = _prepare_config(config_dict)
+    factory = ExperimentFactory(config_dict=cfg)
     loss_fn = factory.get_loss_function()
+    assert isinstance(loss_fn, CoralLoss)
+    assert factory.get_loss_function() is loss_fn
+
+
+@pytest.mark.parametrize('factory_section_name', ['loss'], indirect=True)
+@pytest.mark.parametrize(
+    'strategy_cfg,expected_cls',
+    [
+        ({'type': 'Uncertainty'}, UncertaintyWeightingStrategy),
+        ({'type': 'IMGrad', 'params': {'solver': 'pgd'}}, IMGradStrategy),
+        ({'type': 'NashMTL', 'params': {'solver': 'iterative', 'update_frequency': 3}}, NashMTLStrategy),
+    ],
+)
+def test_get_loss_function_mtl_weighting(factory_section_config, experiment_config_bundle, strategy_cfg, expected_cls):
+    config_kind, _, _ = factory_section_config
+    if config_kind != 'mtl':
+        pytest.skip('MTL-only assertion')
+
+    _, config_dict, _ = experiment_config_bundle
+    cfg = _prepare_config(config_dict)
+    cfg['loss']['weighting_strategy'] = strategy_cfg
+    cfg['optimizer']['use_pcgrad_wrapper'] = False
+
+    factory = ExperimentFactory(config_dict=cfg)
+    loss_fn = factory.get_loss_function()
+    assert isinstance(loss_fn, CoralMTLLoss)
     assert isinstance(loss_fn.weighting_strategy, expected_cls)
 
 
-def test_factory_configures_pcgrad_wrapper(factory_config_dict_mtl, dummy_loaders):
-    base_cfg = copy.deepcopy(factory_config_dict_mtl)
-    base_cfg.setdefault('metrics_processor', {})['enabled'] = False
+@pytest.mark.parametrize('factory_section_name', ['metrics'], indirect=True)
+def test_get_metrics_calculator_matches_model_type(factory_section_config, experiment_config_bundle, tmp_path):
+    config_kind, _, _ = factory_section_config
+    bundle_kind, config_dict, _ = experiment_config_bundle
+    assert config_kind == bundle_kind
 
-    cfg_no_pcgrad = copy.deepcopy(base_cfg)
-    cfg_no_pcgrad.setdefault('optimizer', {})['use_pcgrad_wrapper'] = False
-    with patch.object(ExperimentFactory, 'get_dataloaders', return_value=dummy_loaders):
-        factory_standard = ExperimentFactory(config_dict=cfg_no_pcgrad)
-        optimizer_std, _ = factory_standard.get_optimizer_and_scheduler()
-    assert isinstance(optimizer_std, torch.optim.AdamW)
+    cfg = _prepare_config(config_dict)
+    cfg['trainer']['output_dir'] = str(tmp_path / f"{config_kind}_metrics")
+    factory = ExperimentFactory(config_dict=cfg)
+    metrics = factory.get_metrics_calculator()
 
-    cfg_pcgrad = copy.deepcopy(base_cfg)
-    cfg_pcgrad.setdefault('optimizer', {})['use_pcgrad_wrapper'] = True
-    with patch.object(ExperimentFactory, 'get_dataloaders', return_value=dummy_loaders):
-        factory_pcgrad = ExperimentFactory(config_dict=cfg_pcgrad)
-        optimizer_pg, _ = factory_pcgrad.get_optimizer_and_scheduler()
-    assert isinstance(optimizer_pg, PCGrad)
+    if config_kind == 'mtl':
+        assert isinstance(metrics, CoralMTLMetrics)
+    else:
+        assert isinstance(metrics, CoralMetrics)
+    # Cached object reused
+    assert factory.get_metrics_calculator() is metrics
+
+
+@pytest.mark.parametrize('factory_section_name', ['trainer'], indirect=True)
+def test_get_metrics_storer_resolves_output_dir(factory_section_config, experiment_config_bundle, tmp_path):
+    config_kind, _, _ = factory_section_config
+    bundle_kind, config_dict, _ = experiment_config_bundle
+    assert config_kind == bundle_kind
+
+    cfg = _prepare_config(config_dict)
+    relative_dir = tmp_path / 'relative_run'
+    cfg['trainer']['output_dir'] = relative_dir.as_posix()
+
+    factory = ExperimentFactory(config_dict=cfg)
+    storer = factory.get_metrics_storer()
+    assert isinstance(storer, MetricsStorer)
+    assert Path(storer.output_dir).is_absolute()
+    assert factory.get_metrics_storer() is storer
+
+
+@pytest.mark.parametrize('factory_section_name', ['metrics_processor'], indirect=True)
+@pytest.mark.parametrize('enabled', [False, True])
+def test_get_advanced_metrics_processor_toggle(factory_section_config, experiment_config_bundle, tmp_path, enabled):
+    config_kind, _, _ = factory_section_config
+    bundle_kind, config_dict, _ = experiment_config_bundle
+    assert config_kind == bundle_kind
+
+    cfg = copy.deepcopy(config_dict)
+    cfg.setdefault('metrics_processor', {})['enabled'] = enabled
+    cfg['trainer']['output_dir'] = str(tmp_path / f"{config_kind}_adv_metrics")
+
+    with patch('coral_mtl.ExperimentFactory.AdvancedMetricsProcessor') as processor_mock:
+        processor_mock.return_value = SimpleNamespace(start=lambda: None, shutdown=lambda: None)
+        factory = ExperimentFactory(config_dict=cfg)
+        processor = factory.get_advanced_metrics_processor()
+
+    if enabled:
+        processor_mock.assert_called_once()
+        assert processor is processor_mock.return_value
+        # Cached instance reused
+        assert factory.get_advanced_metrics_processor() is processor
+    else:
+        processor_mock.assert_not_called()
+        assert processor is None
