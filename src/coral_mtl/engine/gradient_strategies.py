@@ -69,6 +69,7 @@ class GradientUpdateStrategy(nn.Module, ABC):
         self._last_task_order: List[str] = []
         self._last_weights: Optional[torch.Tensor] = None
         self._last_metrics: Dict[str, Any] = {}
+        self._cached_losses: Dict[str, Tensor] = {}
 
     @abstractmethod
     def compute_update_vector(self, per_task_gradients: Dict[str, Tensor]) -> Tensor:
@@ -92,6 +93,42 @@ class GradientUpdateStrategy(nn.Module, ABC):
             task: float(self._last_weights[idx])
             for idx, task in enumerate(self._last_task_order)
         }
+
+    def requires_manual_backward_update(self) -> bool:
+        return False
+
+    def manual_backward_update(self, model: nn.Module) -> None:
+        return None
+
+    def cache_unweighted_losses(self, losses: Dict[str, Tensor]) -> None:
+        self._cached_losses = dict(losses)
+        loss_summary = {
+            task: float(val.detach().item())
+            for task, val in losses.items()
+            if torch.is_tensor(val)
+        }
+        if loss_summary:
+            self._record_metric('unweighted_losses', loss_summary)
+
+    def forward(self, unweighted_losses: Dict[str, Tensor]) -> Dict[str, Tensor]:
+        if not unweighted_losses:
+            raise ValueError("GradientUpdateStrategy received empty unweighted_losses")
+        self.cache_unweighted_losses(unweighted_losses)
+        task_names = list(unweighted_losses.keys())
+        device = next(iter(unweighted_losses.values())).device
+        dtype = next(iter(unweighted_losses.values())).dtype
+        if self._last_weights is None or len(self._last_weights) != len(task_names):
+            weights = torch.full((len(task_names),), 1.0 / max(len(task_names), 1), device=device, dtype=dtype)
+        else:
+            weights = self._last_weights.to(device=device, dtype=dtype)
+        total = torch.zeros((), device=device, dtype=dtype)
+        out: Dict[str, Tensor] = {}
+        for idx, task in enumerate(task_names):
+            weighted = weights[idx] * unweighted_losses[task]
+            out[f'weighted_{task}_loss'] = weighted
+            total = total + weighted
+        out['total_loss'] = total
+        return out
 
     def _record_metric(self, name: str, value: Any) -> None:
         self._last_metrics[name] = value
@@ -176,6 +213,7 @@ class IMGradStrategy(GradientUpdateStrategy):
         if not _SOLVERS_AVAILABLE['cvxopt']:
             raise RuntimeError("QP solver requested but `cvxopt` is unavailable.")
         GTG = (G @ G.t()).detach().cpu().numpy()
+        GTG = np.ascontiguousarray(GTG, dtype=np.float64)
         T = GTG.shape[0]
         if T == 1:
             return torch.ones(1, device=G.device, dtype=G.dtype)

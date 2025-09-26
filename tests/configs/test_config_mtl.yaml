@@ -74,12 +74,9 @@ loss:
     focal_gamma: 2.0
     ignore_index: 0
   weighting_strategy:
-    type: "NashMTL"
+    type: "IMGrad"
     params:
-      solver: "ccp"          # or "iterative" / "auto"
-      update_frequency: 10    # reuse computed weights for N steps
-      max_norm: 0.0           # optional gradient clipping
-
+      solver: "qp"           # or "pgd" / "auto"
 # --------------------------------------------------------------------------
 # Configuration for Metrics
 # --------------------------------------------------------------------------

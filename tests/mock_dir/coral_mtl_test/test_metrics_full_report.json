@@ -1,0 +1,1023 @@
+{
+  "tasks": {
+    "genus": {
+      "ungrouped": {
+        "task_summary": {
+          "mIoU": 3.860212691285602e-06,
+          "mPrecision": 0.004702194357366771,
+          "mRecall": 1.3522965375949707e-05,
+          "mF1-Score": 0.00010808011438478774,
+          "pixel_accuracy": 1.7166137695308407e-05
+        },
+        "per_class": {
+          "unlabeled": {
+            "IoU": 0.0,
+            "Precision": NaN,
+            "Recall": 0.0,
+            "F1-Score": NaN,
+            "support": 2684891
+          },
+          "other coral dead": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "other coral bleached": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "other coral alive": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": 0.0,
+            "F1-Score": NaN,
+            "support": 48922
+          },
+          "massive/meandering bleached": {
+            "IoU": 5.404297767799843e-05,
+            "Precision": 0.05642633228840126,
+            "Recall": 5.409186150379883e-05,
+            "F1-Score": 0.00010808011438478774,
+            "support": 1331069
+          },
+          "massive/meandering alive": {
+            "IoU": NaN,
+            "Precision": NaN,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "branching bleached": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "branching dead": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "branching alive": {
+            "IoU": NaN,
+            "Precision": NaN,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "massive/meandering dead": {
+            "IoU": 0.0,
+            "Precision": NaN,
+            "Recall": 0.0,
+            "F1-Score": NaN,
+            "support": 129422
+          },
+          "acropora alive": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "table acropora alive": {
+            "IoU": NaN,
+            "Precision": NaN,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "pocillopora alive": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "table acropora dead": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "meandering bleached": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "stylophora alive": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "meandering alive": {
+            "IoU": NaN,
+            "Precision": NaN,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "meandering dead": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          }
+        },
+        "TIDE_errors": {
+          "classification_error": 0.3598549365996456,
+          "background_error": 0.6401278972624206,
+          "missed_error": 0.0
+        },
+        "BIoU": 0.0013538907713378076
+      },
+      "grouped": {
+        "task_summary": {
+          "mIoU": 0.0007688641811178895,
+          "mPrecision": 0.007919275282345489,
+          "mRecall": 0.15119586130776658,
+          "mF1-Score": 0.006872893265517745,
+          "pixel_accuracy": 0.005307197570799516
+        },
+        "per_class": {
+          "unlabeled": {
+            "IoU": 0.0,
+            "Precision": NaN,
+            "Recall": 0.0,
+            "F1-Score": NaN,
+            "support": 2684891
+          },
+          "other coral": {
+            "IoU": 0.006870519747944696,
+            "Precision": 0.0069278699703626545,
+            "Recall": 0.4535382854339561,
+            "F1-Score": 0.013647275619241749,
+            "support": 48922
+          },
+          "massive/meandering": {
+            "IoU": 4.925788211631017e-05,
+            "Precision": 0.05642633228840126,
+            "Recall": 4.9298489343652236e-05,
+            "F1-Score": 9.851091179374004e-05,
+            "support": 1460491
+          },
+          "branching": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "acropora": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "table acropora": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "pocillopora": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "meandering": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "stylophora": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          }
+        },
+        "TIDE_errors": {
+          "classification_error": 0.35456490516654143,
+          "background_error": 0.6401278972624206,
+          "missed_error": 0.0
+        },
+        "BIoU": 0.006452454387805929
+      }
+    },
+    "health": {
+      "ungrouped": {
+        "task_summary": {
+          "mIoU": 0.002377878645640261,
+          "mPrecision": 0.03676945135928226,
+          "mRecall": 0.008688880891974796,
+          "mF1-Score": 0.06443552408358148,
+          "pixel_accuracy": 0.011029720306393855
+        },
+        "per_class": {
+          "unlabeled": {
+            "IoU": 0.0,
+            "Precision": NaN,
+            "Recall": 0.0,
+            "F1-Score": NaN,
+            "support": 2684891
+          },
+          "other coral dead": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "other coral bleached": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "other coral alive": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": 0.0,
+            "F1-Score": NaN,
+            "support": 48922
+          },
+          "massive/meandering bleached": {
+            "IoU": 0.03329030103896365,
+            "Precision": 0.44123341631138707,
+            "Recall": 0.03475552356789918,
+            "F1-Score": 0.06443552408358148,
+            "support": 1331069
+          },
+          "massive/meandering alive": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "branching bleached": {
+            "IoU": NaN,
+            "Precision": NaN,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "branching dead": {
+            "IoU": NaN,
+            "Precision": NaN,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "branching alive": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "massive/meandering dead": {
+            "IoU": 0.0,
+            "Precision": NaN,
+            "Recall": 0.0,
+            "F1-Score": NaN,
+            "support": 129422
+          },
+          "acropora alive": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "table acropora alive": {
+            "IoU": NaN,
+            "Precision": NaN,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "pocillopora alive": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "table acropora dead": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "meandering bleached": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "stylophora alive": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "meandering alive": {
+            "IoU": NaN,
+            "Precision": NaN,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "meandering dead": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          }
+        },
+        "TIDE_errors": {
+          "classification_error": 0.34884238243094706,
+          "background_error": 0.6401278972624206,
+          "missed_error": 0.0
+        },
+        "BIoU": 0.007311933612988328
+      },
+      "grouped": {
+        "task_summary": {
+          "mIoU": 0.012590777524093892,
+          "mPrecision": 0.1323261423957037,
+          "mRecall": 0.2599748489180364,
+          "mF1-Score": 0.04880646223702538,
+          "pixel_accuracy": 0.024600982666009758
+        },
+        "per_class": {
+          "unlabeled": {
+            "IoU": 0.0,
+            "Precision": NaN,
+            "Recall": 0.0,
+            "F1-Score": NaN,
+            "support": 2684891
+          },
+          "alive coral": {
+            "IoU": 0.012061402155891118,
+            "Precision": 0.012061533116160919,
+            "Recall": 0.9991006091329054,
+            "F1-Score": 0.02383531696831426,
+            "support": 48922
+          },
+          "bleached coral": {
+            "IoU": 0.03830170794048445,
+            "Precision": 0.38491689407095014,
+            "Recall": 0.04079878653924027,
+            "F1-Score": 0.0737776075057365,
+            "support": 1331069
+          },
+          "dead coral": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": 0.0,
+            "F1-Score": NaN,
+            "support": 129422
+          }
+        },
+        "TIDE_errors": {
+          "classification_error": 0.3352711200713312,
+          "background_error": 0.6401278972624206,
+          "missed_error": 0.0
+        },
+        "BIoU": 0.008863759877303356
+      }
+    },
+    "fish": {
+      "ungrouped": {
+        "task_summary": {
+          "mIoU": 0.4856635629505817,
+          "mPrecision": 0.5077798696268693,
+          "mRecall": 0.6205417868296068,
+          "mF1-Score": 0.5049358050281756,
+          "pixel_accuracy": 0.954497337341081
+        },
+        "per_class": {
+          "unlabeled": {
+            "IoU": 0.9544617910155737,
+            "Precision": 0.9979483095757362,
+            "Recall": 0.9563384005856356,
+            "F1-Score": 0.9767003841191678,
+            "support": 4182806
+          },
+          "fish": {
+            "IoU": 0.01686533488558977,
+            "Precision": 0.017611429678002388,
+            "Recall": 0.284745173073578,
+            "F1-Score": 0.03317122593718338,
+            "support": 11498
+          }
+        },
+        "TIDE_errors": {
+          "classification_error": 0.0,
+          "background_error": 0.043541908264149776,
+          "missed_error": 0.0019607543945307825
+        },
+        "BIoU": 0.007169676684918366
+      }
+    },
+    "human_artifacts": {
+      "ungrouped": {
+        "task_summary": {
+          "mIoU": 0.023057223700151862,
+          "mPrecision": 0.2508167383210442,
+          "mRecall": 0.10179302572986579,
+          "mF1-Score": 0.08515955089150726,
+          "pixel_accuracy": 0.08809900283811375
+        },
+        "per_class": {
+          "unlabeled": {
+            "IoU": 0.0875472435338868,
+            "Precision": 0.9984121397871214,
+            "Recall": 0.0875594347727292,
+            "F1-Score": 0.16099943069950676,
+            "support": 4114805
+          },
+          "human": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "transect tools": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "transect line": {
+            "IoU": 0.004681651266720636,
+            "Precision": 0.004854813497055217,
+            "Recall": 0.11602661668700236,
+            "F1-Score": 0.00931967108350775,
+            "support": 79499
+          }
+        },
+        "TIDE_errors": {
+          "classification_error": 0.016618251800533147,
+          "background_error": 0.8951461315152894,
+          "missed_error": 0.00013661384582516273
+        },
+        "BIoU": 0.004300870587571816
+      }
+    },
+    "substrate": {
+      "ungrouped": {
+        "task_summary": {
+          "mIoU": 0.004929231950911624,
+          "mPrecision": 0.1843254312877338,
+          "mRecall": 0.06075463909191223,
+          "mF1-Score": 0.014509347693200541,
+          "pixel_accuracy": 0.0031244754791252315
+        },
+        "per_class": {
+          "unlabeled": {
+            "IoU": 0.0006307087386141486,
+            "Precision": 0.875784190715182,
+            "Recall": 0.0006307651642316391,
+            "F1-Score": 0.0012606223916697785,
+            "support": 2213185
+          },
+          "seagrass": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "sand": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "algae covered substrate": {
+            "IoU": 0.02340874005462534,
+            "Precision": 0.15744808306709265,
+            "Recall": 0.026761017495630333,
+            "F1-Score": 0.04574660961636086,
+            "support": 58929
+          },
+          "unknown hard substrate": {
+            "IoU": 0.0010903295711910466,
+            "Precision": 0.06820113777545282,
+            "Recall": 0.0011068174329582215,
+            "F1-Score": 0.0021782840948190566,
+            "support": 1884683
+          },
+          "rubble": {
+            "IoU": 0.00444561334103921,
+            "Precision": 0.00451917616867547,
+            "Recall": 0.2145199562748287,
+            "F1-Score": 0.008851874669952473,
+            "support": 37507
+          }
+        },
+        "TIDE_errors": {
+          "classification_error": 0.46949672698963413,
+          "background_error": 0.52733159065234,
+          "missed_error": 4.720687866209812e-05
+        },
+        "BIoU": 0.007086821859683317
+      }
+    },
+    "background": {
+      "ungrouped": {
+        "task_summary": {
+          "mIoU": 0.10842915926330365,
+          "mPrecision": 0.31630352948391377,
+          "mRecall": 0.3216954299400783,
+          "mF1-Score": 0.17516807385513825,
+          "pixel_accuracy": 0.27312946319573567
+        },
+        "per_class": {
+          "unlabeled": {
+            "IoU": 0.2807962233467274,
+            "Precision": 0.8936523556087818,
+            "Recall": 0.2905036039381423,
+            "F1-Score": 0.4384713481009576,
+            "support": 3673204
+          },
+          "background": {
+            "IoU": 0.020365242790304248,
+            "Precision": 0.030766619702666715,
+            "Recall": 0.05681653196534869,
+            "F1-Score": 0.039917554883804524,
+            "support": 433923
+          },
+          "dark": {
+            "IoU": 0.02412601165287931,
+            "Precision": 0.024491613140292762,
+            "Recall": 0.617766153916744,
+            "F1-Score": 0.04711531858065267,
+            "support": 87177
+          }
+        },
+        "TIDE_errors": {
+          "classification_error": 0.07524609565733069,
+          "background_error": 0.6213486194609114,
+          "missed_error": 0.030275821685783796
+        },
+        "BIoU": 0.005386546398327544
+      }
+    },
+    "biota": {
+      "ungrouped": {
+        "task_summary": {
+          "mIoU": 0.0019417877114066295,
+          "mPrecision": 0.08342019601887467,
+          "mRecall": 0.02037977330339951,
+          "mF1-Score": 0.022910235799731275,
+          "pixel_accuracy": 0.019736289978022636
+        },
+        "per_class": {
+          "unlabeled": {
+            "IoU": 0.019625721300984753,
+            "Precision": 0.997025732291527,
+            "Recall": 0.01962687038126179,
+            "F1-Score": 0.03849593216605686,
+            "support": 4167399
+          },
+          "trash": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "other animal": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": 0.0,
+            "F1-Score": NaN,
+            "support": 3129
+          },
+          "millepora": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "clam": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "sea cucumber": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "turbinaria": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "sponge": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "anemone": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "sea urchin": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          },
+          "crown of thorn": {
+            "IoU": 0.0036757312358948004,
+            "Precision": 0.004016619934969011,
+            "Recall": 0.04151244952893674,
+            "F1-Score": 0.007324539433405689,
+            "support": 23776
+          },
+          "dead clam": {
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": NaN,
+            "F1-Score": NaN,
+            "support": 0
+          }
+        },
+        "TIDE_errors": {
+          "classification_error": 0.006121158599852056,
+          "background_error": 0.9740843772885861,
+          "missed_error": 5.817413330076738e-05
+        },
+        "BIoU": 0.002212188248106385
+      }
+    }
+  },
+  "global_summary": {
+    "task_summary": {
+      "mIoU": 2.3496946816521055e-06,
+      "mPrecision": 0.004702194357366771,
+      "mRecall": 4.1609124233691405e-06,
+      "mF1-Score": 0.00010808011438478774,
+      "pixel_accuracy": 1.7166137695308407e-05
+    },
+    "per_class": {
+      "background": {
+        "IoU": 0.0,
+        "Precision": NaN,
+        "Recall": 0.0,
+        "F1-Score": NaN,
+        "support": 433923
+      },
+      "seagrass": {
+        "IoU": NaN,
+        "Precision": NaN,
+        "Recall": NaN,
+        "F1-Score": NaN,
+        "support": 0
+      },
+      "trash": {
+        "IoU": NaN,
+        "Precision": NaN,
+        "Recall": NaN,
+        "F1-Score": NaN,
+        "support": 0
+      },
+      "other coral dead": {
+        "IoU": 0.0,
+        "Precision": 0.0,
+        "Recall": NaN,
+        "F1-Score": NaN,
+        "support": 0
+      },
+      "other coral bleached": {
+        "IoU": 0.0,
+        "Precision": 0.0,
+        "Recall": NaN,
+        "F1-Score": NaN,
+        "support": 0
+      },
+      "sand": {
+        "IoU": NaN,
+        "Precision": NaN,
+        "Recall": NaN,
+        "F1-Score": NaN,
+        "support": 0
+      },
+      "other coral alive": {
+        "IoU": 0.0,
+        "Precision": 0.0,
+        "Recall": 0.0,
+        "F1-Score": NaN,
+        "support": 48922
+      },
+      "human": {
+        "IoU": NaN,
+        "Precision": NaN,
+        "Recall": NaN,
+        "F1-Score": NaN,
+        "support": 0
+      },
+      "transect tools": {
+        "IoU": NaN,
+        "Precision": NaN,
+        "Recall": NaN,
+        "F1-Score": NaN,
+        "support": 0
+      },
+      "fish": {
+        "IoU": 0.0,
+        "Precision": NaN,
+        "Recall": 0.0,
+        "F1-Score": NaN,
+        "support": 11498
+      },
+      "algae covered substrate": {
+        "IoU": 0.0,
+        "Precision": NaN,
+        "Recall": 0.0,
+        "F1-Score": NaN,
+        "support": 58929
+      },
+      "other animal": {
+        "IoU": 0.0,
+        "Precision": NaN,
+        "Recall": 0.0,
+        "F1-Score": NaN,
+        "support": 3129
+      },
+      "unknown hard substrate": {
+        "IoU": 0.0,
+        "Precision": NaN,
+        "Recall": 0.0,
+        "F1-Score": NaN,
+        "support": 1884683
+      },
+      "dark": {
+        "IoU": 0.0,
+        "Precision": NaN,
+        "Recall": 0.0,
+        "F1-Score": NaN,
+        "support": 87177
+      },
+      "transect line": {
+        "IoU": 0.0,
+        "Precision": NaN,
+        "Recall": 0.0,
+        "F1-Score": NaN,
+        "support": 79499
+      },
+      "massive/meandering bleached": {
+        "IoU": 5.404297767799843e-05,
+        "Precision": 0.05642633228840126,
+        "Recall": 5.409186150379883e-05,
+        "F1-Score": 0.00010808011438478774,
+        "support": 1331069
+      },
+      "massive/meandering alive": {
+        "IoU": NaN,
+        "Precision": NaN,
+        "Recall": NaN,
+        "F1-Score": NaN,
+        "support": 0
+      },
+      "rubble": {
+        "IoU": 0.0,
+        "Precision": NaN,
+        "Recall": 0.0,
+        "F1-Score": NaN,
+        "support": 37507
+      },
+      "branching bleached": {
+        "IoU": 0.0,
+        "Precision": 0.0,
+        "Recall": NaN,
+        "F1-Score": NaN,
+        "support": 0
+      },
+      "branching dead": {
+        "IoU": 0.0,
+        "Precision": 0.0,
+        "Recall": NaN,
+        "F1-Score": NaN,
+        "support": 0
+      },
+      "millepora": {
+        "IoU": NaN,
+        "Precision": NaN,
+        "Recall": NaN,
+        "F1-Score": NaN,
+        "support": 0
+      },
+      "branching alive": {
+        "IoU": NaN,
+        "Precision": NaN,
+        "Recall": NaN,
+        "F1-Score": NaN,
+        "support": 0
+      },
+      "massive/meandering dead": {
+        "IoU": 0.0,
+        "Precision": NaN,
+        "Recall": 0.0,
+        "F1-Score": NaN,
+        "support": 129422
+      },
+      "clam": {
+        "IoU": NaN,
+        "Precision": NaN,
+        "Recall": NaN,
+        "F1-Score": NaN,
+        "support": 0
+      },
+      "acropora alive": {
+        "IoU": 0.0,
+        "Precision": 0.0,
+        "Recall": NaN,
+        "F1-Score": NaN,
+        "support": 0
+      },
+      "sea cucumber": {
+        "IoU": NaN,
+        "Precision": NaN,
+        "Recall": NaN,
+        "F1-Score": NaN,
+        "support": 0
+      },
+      "turbinaria": {
+        "IoU": NaN,
+        "Precision": NaN,
+        "Recall": NaN,
+        "F1-Score": NaN,
+        "support": 0
+      },
+      "table acropora alive": {
+        "IoU": NaN,
+        "Precision": NaN,
+        "Recall": NaN,
+        "F1-Score": NaN,
+        "support": 0
+      },
+      "sponge": {
+        "IoU": NaN,
+        "Precision": NaN,
+        "Recall": NaN,
+        "F1-Score": NaN,
+        "support": 0
+      },
+      "anemone": {
+        "IoU": NaN,
+        "Precision": NaN,
+        "Recall": NaN,
+        "F1-Score": NaN,
+        "support": 0
+      },
+      "pocillopora alive": {
+        "IoU": 0.0,
+        "Precision": 0.0,
+        "Recall": NaN,
+        "F1-Score": NaN,
+        "support": 0
+      },
+      "table acropora dead": {
+        "IoU": 0.0,
+        "Precision": 0.0,
+        "Recall": NaN,
+        "F1-Score": NaN,
+        "support": 0
+      },
+      "meandering bleached": {
+        "IoU": 0.0,
+        "Precision": 0.0,
+        "Recall": NaN,
+        "F1-Score": NaN,
+        "support": 0
+      },
+      "stylophora alive": {
+        "IoU": 0.0,
+        "Precision": 0.0,
+        "Recall": NaN,
+        "F1-Score": NaN,
+        "support": 0
+      },
+      "sea urchin": {
+        "IoU": NaN,
+        "Precision": NaN,
+        "Recall": NaN,
+        "F1-Score": NaN,
+        "support": 0
+      },
+      "meandering alive": {
+        "IoU": NaN,
+        "Precision": NaN,
+        "Recall": NaN,
+        "F1-Score": NaN,
+        "support": 0
+      },
+      "meandering dead": {
+        "IoU": 0.0,
+        "Precision": 0.0,
+        "Recall": NaN,
+        "F1-Score": NaN,
+        "support": 0
+      },
+      "crown of thorn": {
+        "IoU": 0.0,
+        "Precision": NaN,
+        "Recall": 0.0,
+        "F1-Score": NaN,
+        "support": 23776
+      },
+      "dead clam": {
+        "IoU": NaN,
+        "Precision": NaN,
+        "Recall": NaN,
+        "F1-Score": NaN,
+        "support": 0
+      }
+    },
+    "TIDE_errors": {
+      "classification_error": 0.9845404624936617,
+      "background_error": 0.01544237136840452,
+      "missed_error": 0.0
+    }
+  },
+  "optimization_metrics": {
+    "tasks.genus.ungrouped.mIoU": 3.860212691285602e-06,
+    "tasks.genus.ungrouped.BIoU": 0.0013538907713378076,
+    "tasks.genus.grouped.mIoU": 0.0007688641811178895,
+    "tasks.genus.grouped.BIoU": 0.006452454387805929,
+    "tasks.health.ungrouped.mIoU": 0.002377878645640261,
+    "tasks.health.ungrouped.BIoU": 0.007311933612988328,
+    "tasks.health.grouped.mIoU": 0.012590777524093892,
+    "tasks.health.grouped.BIoU": 0.008863759877303356,
+    "tasks.fish.ungrouped.mIoU": 0.4856635629505817,
+    "tasks.fish.ungrouped.BIoU": 0.007169676684918366,
+    "tasks.human_artifacts.ungrouped.mIoU": 0.023057223700151862,
+    "tasks.human_artifacts.ungrouped.BIoU": 0.004300870587571816,
+    "tasks.substrate.ungrouped.mIoU": 0.004929231950911624,
+    "tasks.substrate.ungrouped.BIoU": 0.007086821859683317,
+    "tasks.background.ungrouped.mIoU": 0.10842915926330365,
+    "tasks.background.ungrouped.BIoU": 0.005386546398327544,
+    "tasks.biota.ungrouped.mIoU": 0.0019417877114066295,
+    "tasks.biota.ungrouped.BIoU": 0.002212188248106385,
+    "global.mIoU": 2.3496946816521055e-06,
+    "global.BIoU": 0.0005682912135346472,
+    "global.classification_error": 0.9845404624936617,
+    "global.background_error": 0.01544237136840452,
+    "global.missed_error": 0.0,
+    "global.Boundary_F1": 0.0011359156803866326,
+    "global.Boundary_Precision": 0.05299739355545978,
+    "global.Boundary_Recall": 0.0005741212493864303,
+    "global.NLL": 12.598498344421387,
+    "global.Brier_Score": 1.01471745967865,
+    "global.ECE": 0.06146467477083206
+  }
+}

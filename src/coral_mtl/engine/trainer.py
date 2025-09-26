@@ -85,6 +85,7 @@ class Trainer:
 
         for i, batch in enumerate(loop):
             diagnostics_payload: Dict[str, Any] = {}
+            manual_update_applied = False
             # The 'masks' key holds the appropriately transformed GT for the loss function
             images = batch['image'].to(self.device, non_blocking=True)
             # Use 'masks' for MTL (dict) or 'mask' for baseline (tensor)
@@ -134,7 +135,11 @@ class Trainer:
                         segment = update_vec[offset: offset + n].view(p.shape)
                         p.grad = segment.clone()
                         offset += n
-                    loss_dict_or_tensor = {'total_loss': update_vec.norm()}  # placeholder scalar for logging
+                    manual_update_applied = True
+                    stacked_losses = torch.stack([loss.detach() for loss in unweighted.values()]) if unweighted else torch.tensor([0.0], device=self.device)
+                    loss_dict_or_tensor = {'total_loss': stacked_losses.mean()}
+                    for task_name, task_loss in unweighted.items():
+                        loss_dict_or_tensor[f'unweighted_{task_name}_loss'] = task_loss.detach()
                 else:
                     loss_dict_or_tensor = self.loss_fn(predictions, masks_for_loss)
                     if isinstance(loss_dict_or_tensor, dict):
@@ -159,7 +164,13 @@ class Trainer:
 
             raw_total_loss_value = float(total_loss.detach().item())
 
-            if self.pcgrad_enabled:
+            if manual_update_applied:
+                if (i + 1) % self.config.gradient_accumulation_steps == 0 or (i + 1) == len(self.train_loader):
+                    base_optimizer = getattr(self.optimizer, 'optimizer', self.optimizer)
+                    base_optimizer.step()
+                    self.optimizer.zero_grad()
+                    self.scheduler.step()
+            elif self.pcgrad_enabled:
                 self.optimizer.zero_grad()
                 self._apply_pcgrad(loss_dict_or_tensor)
                 self.optimizer.zero_grad()

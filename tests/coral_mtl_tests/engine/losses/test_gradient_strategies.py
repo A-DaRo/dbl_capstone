@@ -1,5 +1,6 @@
 from typing import Dict, List
 
+import numpy as np
 import pytest
 import torch
 import torch.nn as nn
@@ -157,6 +158,39 @@ def test_imgrad_qp_solver_invoked_when_available(monkeypatch, conflicting_gradie
     assert torch.isfinite(update).all()
 
 
+def test_imgrad_qp_handles_float32_inputs(monkeypatch, conflicting_gradients: Dict[str, torch.Tensor]) -> None:
+    dtype_records: List[np.dtype] = []
+
+    class DummyMatrix:
+        def __init__(self, data: object) -> None:
+            array = np.asarray(data)
+            dtype_records.append(array.dtype)
+            self.data = array
+
+        def __len__(self) -> int:
+            return int(self.data.size)
+
+    class DummySolvers:
+        def __init__(self) -> None:
+            self.options: Dict[str, object] = {}
+
+        def qp(self, P, q, G, h, A, b):  # pragma: no cover - simple stub
+            size = q.data.size if isinstance(q, DummyMatrix) else len(q)
+            solution = np.full((size, 1), 1.0 / max(size, 1), dtype=np.float64)
+            return {"status": "optimal", "x": solution}
+
+    monkeypatch.setitem(_SOLVERS_AVAILABLE, "cvxopt", True)
+    monkeypatch.setattr("coral_mtl.engine.gradient_strategies.matrix", lambda data: DummyMatrix(data))
+    monkeypatch.setattr("coral_mtl.engine.gradient_strategies.solvers", DummySolvers())
+
+    strategy = IMGradStrategy(TASKS, solver="qp")
+    update = strategy.compute_update_vector(conflicting_gradients)
+
+    assert dtype_records, "Expected cvxopt.matrix to be invoked at least once"
+    assert all(dtype == np.float64 for dtype in dtype_records)
+    assert torch.isfinite(update).all()
+
+
 def test_nash_iterative_fallback_produces_finite_update(conflicting_gradients: Dict[str, torch.Tensor]) -> None:
     strategy = NashMTLStrategy(TASKS, solver="iterative", optim_niter=15)
     update = strategy.compute_update_vector(conflicting_gradients)
@@ -296,3 +330,11 @@ def test_gradient_strategies_reduce_combined_loss(
 
     after = total_unweighted_loss()
     assert after <= before + 1e-3
+
+
+def test_gradient_strategies_manual_update_interface(conflicting_gradients: Dict[str, torch.Tensor]) -> None:
+    strategy = NashMTLStrategy(TASKS, solver="iterative")
+    assert hasattr(strategy, "requires_manual_backward_update")
+    assert hasattr(strategy, "manual_backward_update")
+    assert strategy.requires_manual_backward_update() is False
+    strategy.manual_backward_update(nn.Linear(4, 2))  # should be a no-op

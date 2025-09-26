@@ -26,8 +26,8 @@ CONFIG_ROOT = TESTS_ROOT / "configs"
 PDS_ROOT = TESTS_ROOT / "dataset" / "processed" / "pds_patches"
 
 CONFIG_REGISTRY: Dict[str, Path] = {
-	"baseline": CONFIG_ROOT / "test_config_baseline.yaml",
 	"mtl": CONFIG_ROOT / "test_config_mtl.yaml",
+	"baseline": CONFIG_ROOT / "test_config_baseline.yaml",
 }
 
 
@@ -107,9 +107,6 @@ def run_trial(config_name: str, use_pds: bool) -> Dict[str, Any]:
 	print("Key optimization metrics:")
 	print(json.dumps(summary, indent=2))
 
-	# Optional clean-up to keep the mock directory tidy
-	if output_dir:
-		shutil.rmtree(output_dir, ignore_errors=True)
 
 	return {
 		"best_metric": best_metric,

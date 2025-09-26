@@ -1,0 +1,173 @@
+{
+  "tasks.genus.ungrouped.mIoU": [
+    0.002872515415944535
+  ],
+  "tasks.genus.ungrouped.BIoU": [
+    0.001747481691575147
+  ],
+  "tasks.genus.grouped.mIoU": [
+    0.011491328664004676
+  ],
+  "tasks.genus.grouped.BIoU": [
+    0.006349036806172642
+  ],
+  "tasks.health.ungrouped.mIoU": [
+    0.0002167584310249888
+  ],
+  "tasks.health.ungrouped.BIoU": [
+    0.002012705201574456
+  ],
+  "tasks.health.grouped.mIoU": [
+    0.03919987954956931
+  ],
+  "tasks.health.grouped.BIoU": [
+    0.007968668923402039
+  ],
+  "tasks.fish.ungrouped.mIoU": [
+    0.4561749685791849
+  ],
+  "tasks.fish.ungrouped.BIoU": [
+    0.005087556064479628
+  ],
+  "tasks.human_artifacts.ungrouped.mIoU": [
+    0.033063411712646484
+  ],
+  "tasks.human_artifacts.ungrouped.BIoU": [
+    0.0
+  ],
+  "tasks.substrate.ungrouped.mIoU": [
+    0.011856141730789846
+  ],
+  "tasks.substrate.ungrouped.BIoU": [
+    0.0075863070993148546
+  ],
+  "tasks.background.ungrouped.mIoU": [
+    0.16937544122589251
+  ],
+  "tasks.background.ungrouped.BIoU": [
+    0.019153836828673807
+  ],
+  "tasks.biota.ungrouped.mIoU": [
+    0.00406593907717129
+  ],
+  "tasks.biota.ungrouped.BIoU": [
+    0.0007606582712439702
+  ],
+  "global.mIoU": [
+    0.0018733796190942619
+  ],
+  "global.BIoU": [
+    0.0012981055914866291
+  ],
+  "global.classification_error": [
+    0.8326044082637633
+  ],
+  "global.background_error": [
+    0.13519430160516016
+  ],
+  "global.missed_error": [
+    0.0
+  ],
+  "global.Boundary_F1": [
+    0.0025923457040590457
+  ],
+  "global.Boundary_Precision": [
+    0.002540547010585491
+  ],
+  "global.Boundary_Recall": [
+    0.002647342211847722
+  ],
+  "global.NLL": [
+    10.370434761047363
+  ],
+  "global.Brier_Score": [
+    0.9992179870605469
+  ],
+  "global.ECE": [
+    0.02947518602013588
+  ],
+  "train_total_loss": [
+    NaN
+  ],
+  "train_unweighted_genus_loss": [
+    1.8423385620117188
+  ],
+  "train_unweighted_health_loss": [
+    1.658691644668579
+  ],
+  "train_unweighted_fish_loss": [
+    NaN
+  ],
+  "train_unweighted_human_artifacts_loss": [
+    NaN
+  ],
+  "train_unweighted_substrate_loss": [
+    1.8608647584915161
+  ],
+  "train_unweighted_background_loss": [
+    1.017879843711853
+  ],
+  "train_unweighted_biota_loss": [
+    NaN
+  ],
+  "val_weighted_genus_loss": [
+    9.642576333135366e-05
+  ],
+  "val_weighted_health_loss": [
+    0.00011940220429096371
+  ],
+  "val_weighted_fish_loss": [
+    0.26512277126312256
+  ],
+  "val_weighted_human_artifacts_loss": [
+    0.0
+  ],
+  "val_weighted_substrate_loss": [
+    0.00014856824418529868
+  ],
+  "val_weighted_background_loss": [
+    9.912873792927712e-06
+  ],
+  "val_weighted_biota_loss": [
+    0.7894721627235413
+  ],
+  "val_total_loss": [
+    1.054969310760498
+  ],
+  "val_consistency_loss": [
+    0.0
+  ],
+  "val_primary_balanced_loss": [
+    0.00021582796762231737
+  ],
+  "val_aux_balanced_loss": [
+    1.0547534227371216
+  ],
+  "val_unweighted_genus_loss": [
+    1.7948291301727295
+  ],
+  "val_unweighted_health_loss": [
+    1.7551710605621338
+  ],
+  "val_unweighted_fish_loss": [
+    0.7955379486083984
+  ],
+  "val_unweighted_human_artifacts_loss": [
+    0.0
+  ],
+  "val_unweighted_substrate_loss": [
+    1.8082869052886963
+  ],
+  "val_unweighted_background_loss": [
+    1.066260576248169
+  ],
+  "val_unweighted_biota_loss": [
+    2.3689215183258057
+  ],
+  "val_unweighted_aux_loss_sum": [
+    6.039007186889648
+  ],
+  "epoch": [
+    1
+  ]
+}

@@ -59,7 +59,9 @@ class TestFactoryInitialization:
         relative_config_path = tmp_path / "relative_config.yaml"
         config_content = {
             'data': {
-                'task_definitions_path': 'tests/configs/tasks/task_definitions.yaml'
+                'dataset_name': './tests/dataset/coralscapes/',
+                'task_definitions_path': 'tests/configs/tasks/task_definitions.yaml',
+                'pds_train_path': './tests/dataset/processed/pds_patches/'
             },
             'trainer': {
                 'output_dir': './experiments/my_test_run'
@@ -74,6 +76,13 @@ class TestFactoryInitialization:
         resolved_task_path = Path(factory.config['data']['task_definitions_path'])
         assert resolved_task_path.is_absolute()
         assert resolved_task_path.exists()
+
+        resolved_dataset = Path(factory.config['data']['dataset_name'])
+        assert resolved_dataset.is_absolute()
+        assert resolved_dataset.parent.exists()
+
+        resolved_pds = Path(factory.config['data']['pds_train_path'])
+        assert resolved_pds.is_absolute()
         
         resolved_output_dir = Path(factory.config['trainer']['output_dir'])
         assert resolved_output_dir.is_absolute()

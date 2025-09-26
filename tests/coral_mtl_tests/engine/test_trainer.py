@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch, call
 import optuna
 
 from coral_mtl.engine.trainer import Trainer
+from coral_mtl.engine.gradient_strategies import GradientUpdateStrategy
 
 
 # --- Fixtures for Mocking Dependencies ---
@@ -259,3 +260,93 @@ def test_optuna_pruning(
         
     # Verify that trial.report was still called before pruning
     mock_trial.report.assert_called_once_with(0.8, 0) # Metric from epoch 0
+
+
+def test_trainer_handles_gradient_strategy_without_backward(monkeypatch, tmp_path):
+    """Ensure manual gradient strategies integrate without autograd backward."""
+
+    class ToyModel(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.net = torch.nn.Sequential(
+                torch.nn.Flatten(),
+                torch.nn.Linear(3 * 32 * 32, 16),
+                torch.nn.ReLU(),
+                torch.nn.Linear(16, 4),
+            )
+
+        def forward(self, x):
+            logits = self.net(x)
+            return {'task_a': logits}
+
+    class DummyStrategy(GradientUpdateStrategy):
+        def __init__(self, tasks):
+            super().__init__(tasks)
+
+        def compute_update_vector(self, per_task_gradients):
+            task_names = list(per_task_gradients.keys())
+            stacked = torch.stack([per_task_gradients[name] for name in task_names], dim=0)
+            weights = torch.ones(len(task_names), device=stacked.device, dtype=stacked.dtype) / max(1, len(task_names))
+            self._record_weights(task_names, weights)
+            return stacked.mean(dim=0)
+
+    class DummyLoss:
+        def __init__(self, strategy):
+            self.weighting_strategy = strategy
+            self.primary_tasks = strategy.tasks
+
+        def compute_unweighted_losses(self, predictions, masks):
+            base = predictions['task_a'].mean()
+            return {task: base + (0.1 * idx) for idx, task in enumerate(self.primary_tasks)}
+
+        def __call__(self, predictions, masks):
+            return {'total_loss': predictions['task_a'].mean()}
+
+    train_batch = {'image': torch.randn(2, 3, 32, 32), 'masks': {'task_a': torch.zeros(2, 32, 32)}}
+    train_loader = [train_batch, train_batch]
+    val_loader = []
+
+    strategy = DummyStrategy(tasks=['task_a', 'task_b'])
+    model = ToyModel()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1)
+    optimizer_step_spy = MagicMock(side_effect=optimizer.step)
+    optimizer.step = optimizer_step_spy
+    scheduler_step_spy = MagicMock(side_effect=scheduler.step)
+    scheduler.step = scheduler_step_spy
+
+    config = SimpleNamespace(
+        device='cpu',
+        output_dir=str(tmp_path),
+        epochs=1,
+        model_selection_metric='global.BIoU',
+        use_mixed_precision=False,
+        gradient_accumulation_steps=1,
+        patch_size=[32, 32],
+        inference_stride=[16, 16],
+        inference_batch_size=1
+    )
+
+    metrics_calculator = MagicMock()
+    metrics_storer = MagicMock()
+
+    dummy_loss = DummyLoss(strategy=strategy)
+    trainer = Trainer(
+        model=model,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        loss_fn=dummy_loss,
+        metrics_calculator=metrics_calculator,
+        metrics_storer=metrics_storer,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        config=config
+    )
+
+    monkeypatch.setattr(Trainer, '_should_validate', lambda self, epoch: False)
+
+    trainer.train()
+
+    assert optimizer_step_spy.call_count == len(train_loader)
+    assert scheduler_step_spy.call_count == len(train_loader)
+    metrics_calculator.compute.assert_not_called()
