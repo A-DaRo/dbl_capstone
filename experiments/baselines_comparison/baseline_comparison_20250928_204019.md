@@ -1,0 +1,172 @@
+2025-09-28 20:40:19,956 - __main__ - INFO - [_setup_logging:122] - Logging configured with file: /workspace/dbl_capstone/experiments/baselines_comparison/baseline_comparison_20250928_204019.md
+2025-09-28 20:40:19,956 - __main__ - INFO - [_setup_logging:123] - Log level set to: DEBUG
+2025-09-28 20:40:19,957 - __main__ - INFO - [_setup_logging:124] - Python version: 3.12.11 | packaged by conda-forge | (main, Jun  4 2025, 14:45:31) [GCC 13.3.0]
+2025-09-28 20:40:19,957 - __main__ - INFO - [_setup_logging:125] - PyTorch version: 2.8.0+cu129
+2025-09-28 20:40:19,957 - __main__ - INFO - [_setup_logging:126] - Current working directory: /workspace/dbl_capstone/experiments/baselines_comparison
+2025-09-28 20:40:19,957 - __main__ - INFO - [_setup_logging:127] - Script directory: /workspace/dbl_capstone/experiments/baselines_comparison
+2025-09-28 20:40:19,958 - __main__ - INFO - [_setup_logging:137] - Platform: Linux-6.8.0-83-generic-x86_64-with-glibc2.39
+2025-09-28 20:40:19,959 - __main__ - INFO - [_setup_logging:138] - Architecture: ('64bit', '')
+2025-09-28 20:40:20,110 - __main__ - INFO - [_setup_logging:140] - CUDA available: True, devices: 1
+2025-09-28 20:40:20,113 - __main__ - INFO - [_setup_logging:142] -   GPU 0: NVIDIA GeForce RTX 5090
+2025-09-28 20:40:20,113 - __main__ - DEBUG - [_validate_configs:180] - Starting configuration validation
+2025-09-28 20:40:20,113 - __main__ - DEBUG - [_validate_configs:182] - Checking baseline config at path: /workspace/dbl_capstone/configs/baseline_comparisons/baseline_config.yaml
+2025-09-28 20:40:20,113 - __main__ - DEBUG - [_validate_configs:189] - ✓ baseline config file exists
+2025-09-28 20:40:20,113 - __main__ - DEBUG - [_validate_configs:182] - Checking mtl config at path: /workspace/dbl_capstone/configs/baseline_comparisons/mtl_config.yaml
+2025-09-28 20:40:20,113 - __main__ - DEBUG - [_validate_configs:189] - ✓ mtl config file exists
+2025-09-28 20:40:20,113 - __main__ - INFO - [_validate_configs:190] - All configuration files validated successfully
+2025-09-28 20:40:20,113 - __main__ - INFO - [run_comparison:390] - 🔬 Starting Comprehensive Baseline Comparison
+2025-09-28 20:40:20,113 - __main__ - INFO - [run_comparison:391] - Modes to run: mtl, baseline
+2025-09-28 20:40:20,113 - __main__ - INFO - [run_comparison:392] - Skip training: False
+2025-09-28 20:40:20,113 - __main__ - DEBUG - [run_comparison:393] - Config directory: /workspace/dbl_capstone/configs/baseline_comparisons
+2025-09-28 20:40:20,113 - __main__ - DEBUG - [run_comparison:394] - Available config files: ['baseline', 'mtl']
+2025-09-28 20:40:20,113 - __main__ - DEBUG - [run_comparison:404] - Checkpoint paths provided: {}
+2025-09-28 20:40:20,113 - __main__ - INFO - [run_comparison:408] - 
+🚀 Running experiment 1/2: mtl
+2025-09-28 20:40:20,113 - __main__ - DEBUG - [run_comparison:417] - Config path for mtl: /workspace/dbl_capstone/configs/baseline_comparisons/mtl_config.yaml
+2025-09-28 20:40:20,113 - __main__ - DEBUG - [run_comparison:418] - Checkpoint path for mtl: None
+2025-09-28 20:40:20,113 - __main__ - INFO - [run_single_experiment:211] - 
+============================================================
+2025-09-28 20:40:20,113 - __main__ - INFO - [run_single_experiment:212] - Starting MTL Experiment
+2025-09-28 20:40:20,113 - __main__ - INFO - [run_single_experiment:213] - Config: /workspace/dbl_capstone/configs/baseline_comparisons/mtl_config.yaml
+2025-09-28 20:40:20,114 - __main__ - INFO - [run_single_experiment:214] - Skip training: False
+2025-09-28 20:40:20,114 - __main__ - INFO - [run_single_experiment:215] - Checkpoint path: Auto-detect best
+2025-09-28 20:40:20,114 - __main__ - INFO - [run_single_experiment:216] - ============================================================
+2025-09-28 20:40:20,114 - __main__ - DEBUG - [run_single_experiment:220] - Initializing ExperimentFactory with config: /workspace/dbl_capstone/configs/baseline_comparisons/mtl_config.yaml
+2025-09-28 20:40:20,120 - __main__ - DEBUG - [run_single_experiment:222] - ExperimentFactory initialized successfully
+2025-09-28 20:40:20,120 - __main__ - DEBUG - [run_single_experiment:237] - Logging experiment configuration details...
+2025-09-28 20:40:20,121 - __main__ - INFO - [run_single_experiment:245] - Model type: CoralMTL
+2025-09-28 20:40:20,121 - __main__ - INFO - [run_single_experiment:246] - Primary tasks: ['genus', 'health']
+2025-09-28 20:40:20,121 - __main__ - INFO - [run_single_experiment:247] - Auxiliary tasks: ['fish', 'human_artifacts', 'substrate', 'background', 'biota']
+2025-09-28 20:40:20,121 - __main__ - INFO - [run_single_experiment:248] - Device policy: cuda
+2025-09-28 20:40:20,121 - __main__ - INFO - [run_single_experiment:249] - Batch size per GPU: 8
+2025-09-28 20:40:20,121 - __main__ - INFO - [run_single_experiment:250] - Learning rate: 6e-05
+2025-09-28 20:40:20,121 - __main__ - INFO - [run_single_experiment:251] - Epochs: 50
+2025-09-28 20:40:20,121 - __main__ - INFO - [run_single_experiment:252] - Output directory: /workspace/dbl_capstone/experiments/baseline_comparisons/coral_mtl_b2_run
+2025-09-28 20:40:20,121 - __main__ - INFO - [run_single_experiment:258] - 🎯 Phase 1: Training & Validation for mtl
+2025-09-28 20:40:20,121 - __main__ - DEBUG - [run_single_experiment:259] - Starting training phase...
+2025-09-28 20:40:20,121 - __main__ - DEBUG - [run_single_experiment:262] - Training started at: 2025-09-28 20:40:20.121142
+2025-09-28 20:43:44,590 - __main__ - ERROR - [run_single_experiment:275] - ❌ Training failed for mtl: CUDA out of memory. Tried to allocate 1.42 GiB. GPU 0 has a total capacity of 31.36 GiB of which 828.00 MiB is free. Including non-PyTorch memory, this process has 30.47 GiB memory in use. Of the allocated memory 21.80 GiB is allocated by PyTorch, and 8.06 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Traceback (most recent call last):
+  File "/workspace/dbl_capstone/experiments/baselines_comparison/train_val_test_script.py", line 264, in run_single_experiment
+    factory.run_training()
+  File "/workspace/dbl_capstone/experiments/baselines_comparison/../../src/coral_mtl/ExperimentFactory.py", line 606, in run_training
+    trainer.train()
+  File "/workspace/dbl_capstone/experiments/baselines_comparison/../../src/coral_mtl/engine/trainer.py", line 479, in train
+    val_metrics_report = self._validate_one_epoch(epoch + 1)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/dbl_capstone/experiments/baselines_comparison/../../src/coral_mtl/engine/trainer.py", line 359, in _validate_one_epoch
+    stitched_predictions_logits = inferrer.predict(batch_images)
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/dbl_capstone/experiments/baselines_comparison/../../src/coral_mtl/engine/inference.py", line 63, in predict
+    return self._execute_inference(batch_images_tensor)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/dbl_capstone/experiments/baselines_comparison/../../src/coral_mtl/engine/inference.py", line 97, in _execute_inference
+    final_logits = self._stitch_patches(all_patch_logits, patch_coords,
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/dbl_capstone/experiments/baselines_comparison/../../src/coral_mtl/engine/inference.py", line 156, in _stitch_patches
+    logit_accumulator = torch.zeros((batch_size, num_classes, padded_h, padded_w), dtype=torch.float32, device=self.device)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 1.42 GiB. GPU 0 has a total capacity of 31.36 GiB of which 828.00 MiB is free. Including non-PyTorch memory, this process has 30.47 GiB memory in use. Of the allocated memory 21.80 GiB is allocated by PyTorch, and 8.06 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+2025-09-28 20:43:44,911 - __main__ - ERROR - [run_comparison:431] - ❌ Experiment mtl failed: ❌ Training failed for mtl: CUDA out of memory. Tried to allocate 1.42 GiB. GPU 0 has a total capacity of 31.36 GiB of which 828.00 MiB is free. Including non-PyTorch memory, this process has 30.47 GiB memory in use. Of the allocated memory 21.80 GiB is allocated by PyTorch, and 8.06 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+2025-09-28 20:43:44,912 - __main__ - INFO - [run_comparison:408] - 
+🚀 Running experiment 2/2: baseline
+2025-09-28 20:43:44,912 - __main__ - DEBUG - [run_comparison:417] - Config path for baseline: /workspace/dbl_capstone/configs/baseline_comparisons/baseline_config.yaml
+2025-09-28 20:43:44,912 - __main__ - DEBUG - [run_comparison:418] - Checkpoint path for baseline: None
+2025-09-28 20:43:44,912 - __main__ - INFO - [run_single_experiment:211] - 
+============================================================
+2025-09-28 20:43:44,912 - __main__ - INFO - [run_single_experiment:212] - Starting BASELINE Experiment
+2025-09-28 20:43:44,912 - __main__ - INFO - [run_single_experiment:213] - Config: /workspace/dbl_capstone/configs/baseline_comparisons/baseline_config.yaml
+2025-09-28 20:43:44,912 - __main__ - INFO - [run_single_experiment:214] - Skip training: False
+2025-09-28 20:43:44,912 - __main__ - INFO - [run_single_experiment:215] - Checkpoint path: Auto-detect best
+2025-09-28 20:43:44,912 - __main__ - INFO - [run_single_experiment:216] - ============================================================
+2025-09-28 20:43:44,912 - __main__ - DEBUG - [run_single_experiment:220] - Initializing ExperimentFactory with config: /workspace/dbl_capstone/configs/baseline_comparisons/baseline_config.yaml
+2025-09-28 20:43:44,920 - __main__ - DEBUG - [run_single_experiment:222] - ExperimentFactory initialized successfully
+2025-09-28 20:43:44,920 - __main__ - DEBUG - [run_single_experiment:237] - Logging experiment configuration details...
+2025-09-28 20:43:44,920 - __main__ - INFO - [run_single_experiment:245] - Model type: SegFormerBaseline
+2025-09-28 20:43:44,920 - __main__ - INFO - [run_single_experiment:246] - Primary tasks: []
+2025-09-28 20:43:44,920 - __main__ - INFO - [run_single_experiment:247] - Auxiliary tasks: []
+2025-09-28 20:43:44,920 - __main__ - INFO - [run_single_experiment:248] - Device policy: cuda
+2025-09-28 20:43:44,920 - __main__ - INFO - [run_single_experiment:249] - Batch size per GPU: 8
+2025-09-28 20:43:44,920 - __main__ - INFO - [run_single_experiment:250] - Learning rate: 6e-05
+2025-09-28 20:43:44,920 - __main__ - INFO - [run_single_experiment:251] - Epochs: 50
+2025-09-28 20:43:44,920 - __main__ - INFO - [run_single_experiment:252] - Output directory: /workspace/dbl_capstone/experiments/baseline_comparisons/coral_baseline_b2_run
+2025-09-28 20:43:44,920 - __main__ - INFO - [run_single_experiment:258] - 🎯 Phase 1: Training & Validation for baseline
+2025-09-28 20:43:44,920 - __main__ - DEBUG - [run_single_experiment:259] - Starting training phase...
+2025-09-28 20:43:44,920 - __main__ - DEBUG - [run_single_experiment:262] - Training started at: 2025-09-28 20:43:44.920528
+2025-09-28 20:43:50,856 - __main__ - ERROR - [_sigint_handler:152] - Received KeyboardInterrupt (Ctrl-C). Flushing logs and exiting...
+NoneType: None
+2025-09-28 20:43:50,856 - __main__ - ERROR - [_sigint_handler:152] - Received KeyboardInterrupt (Ctrl-C). Flushing logs and exiting...
+NoneType: None
+2025-09-28 20:43:50,856 - __main__ - ERROR - [_sigint_handler:152] - Received KeyboardInterrupt (Ctrl-C). Flushing logs and exiting...
+NoneType: None
+2025-09-28 20:43:50,856 - __main__ - ERROR - [_sigint_handler:152] - Received KeyboardInterrupt (Ctrl-C). Flushing logs and exiting...
+NoneType: None
+2025-09-28 20:43:50,856 - __main__ - ERROR - [_sigint_handler:152] - Received KeyboardInterrupt (Ctrl-C). Flushing logs and exiting...
+NoneType: None
+2025-09-28 20:43:50,856 - __main__ - ERROR - [_sigint_handler:152] - Received KeyboardInterrupt (Ctrl-C). Flushing logs and exiting...
+NoneType: None
+2025-09-28 20:43:50,856 - __main__ - ERROR - [_sigint_handler:152] - Received KeyboardInterrupt (Ctrl-C). Flushing logs and exiting...
+NoneType: None
+2025-09-28 20:43:50,856 - __main__ - ERROR - [_sigint_handler:152] - Received KeyboardInterrupt (Ctrl-C). Flushing logs and exiting...
+NoneType: None
+2025-09-28 20:43:50,856 - __main__ - ERROR - [_sigint_handler:152] - Received KeyboardInterrupt (Ctrl-C). Flushing logs and exiting...
+NoneType: None
+2025-09-28 20:43:50,856 - __main__ - ERROR - [_sigint_handler:152] - Received KeyboardInterrupt (Ctrl-C). Flushing logs and exiting...
+NoneType: None
+2025-09-28 20:43:50,856 - __main__ - ERROR - [_sigint_handler:152] - Received KeyboardInterrupt (Ctrl-C). Flushing logs and exiting...
+NoneType: None
+2025-09-28 20:43:50,856 - __main__ - ERROR - [_sigint_handler:152] - Received KeyboardInterrupt (Ctrl-C). Flushing logs and exiting...
+NoneType: None
+2025-09-28 20:43:50,856 - __main__ - ERROR - [_sigint_handler:152] - Received KeyboardInterrupt (Ctrl-C). Flushing logs and exiting...
+NoneType: None
+2025-09-28 20:43:50,856 - __main__ - ERROR - [_sigint_handler:152] - Received KeyboardInterrupt (Ctrl-C). Flushing logs and exiting...
+NoneType: None
+2025-09-28 20:43:50,856 - __main__ - ERROR - [_sigint_handler:152] - Received KeyboardInterrupt (Ctrl-C). Flushing logs and exiting...
+NoneType: None
+2025-09-28 20:43:50,856 - __main__ - ERROR - [_sigint_handler:152] - Received KeyboardInterrupt (Ctrl-C). Flushing logs and exiting...
+NoneType: None
+2025-09-28 20:43:50,856 - __main__ - ERROR - [_sigint_handler:152] - Received KeyboardInterrupt (Ctrl-C). Flushing logs and exiting...
+NoneType: None
+2025-09-28 20:43:50,856 - __main__ - ERROR - [_sigint_handler:152] - Received KeyboardInterrupt (Ctrl-C). Flushing logs and exiting...
+NoneType: None
+2025-09-28 20:43:50,856 - __main__ - ERROR - [_sigint_handler:152] - Received KeyboardInterrupt (Ctrl-C). Flushing logs and exiting...
+NoneType: None
+2025-09-28 20:43:50,856 - __main__ - ERROR - [_sigint_handler:152] - Received KeyboardInterrupt (Ctrl-C). Flushing logs and exiting...
+NoneType: None
+2025-09-28 20:43:50,856 - __main__ - ERROR - [_sigint_handler:152] - Received KeyboardInterrupt (Ctrl-C). Flushing logs and exiting...
+NoneType: None
+2025-09-28 20:43:50,856 - __main__ - ERROR - [_sigint_handler:152] - Received KeyboardInterrupt (Ctrl-C). Flushing logs and exiting...
+NoneType: None
+2025-09-28 20:43:50,857 - __main__ - ERROR - [_sigint_handler:152] - Received KeyboardInterrupt (Ctrl-C). Flushing logs and exiting...
+NoneType: None
+2025-09-28 20:43:50,857 - __main__ - ERROR - [_sigint_handler:152] - Received KeyboardInterrupt (Ctrl-C). Flushing logs and exiting...
+NoneType: None
+2025-09-28 20:43:50,963 - __main__ - ERROR - [_sigint_handler:152] - Received KeyboardInterrupt (Ctrl-C). Flushing logs and exiting...
+NoneType: None
+2025-09-28 20:43:50,963 - __main__ - ERROR - [main:660] - Experiment interrupted by user (Ctrl-C)
+Traceback (most recent call last):
+  File "/workspace/dbl_capstone/experiments/baselines_comparison/train_val_test_script.py", line 640, in main
+    results = comparison.run_comparison(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/dbl_capstone/experiments/baselines_comparison/train_val_test_script.py", line 420, in run_comparison
+    experiment_result = self.run_single_experiment(
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/dbl_capstone/experiments/baselines_comparison/train_val_test_script.py", line 264, in run_single_experiment
+    factory.run_training()
+  File "/workspace/dbl_capstone/experiments/baselines_comparison/../../src/coral_mtl/ExperimentFactory.py", line 606, in run_training
+    trainer.train()
+  File "/workspace/dbl_capstone/experiments/baselines_comparison/../../src/coral_mtl/engine/trainer.py", line 473, in train
+    train_loss_report = self._train_one_epoch(epoch + 1)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/dbl_capstone/experiments/baselines_comparison/../../src/coral_mtl/engine/trainer.py", line 217, in _train_one_epoch
+    total_loss.backward()
+  File "/venv/main/lib/python3.12/site-packages/torch/_tensor.py", line 647, in backward
+    torch.autograd.backward(
+  File "/venv/main/lib/python3.12/site-packages/torch/autograd/__init__.py", line 354, in backward
+    _engine_run_backward(
+  File "/venv/main/lib/python3.12/site-packages/torch/autograd/graph.py", line 829, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/dbl_capstone/experiments/baselines_comparison/train_val_test_script.py", line 162, in _sigint_handler
+    raise KeyboardInterrupt()
+KeyboardInterrupt
