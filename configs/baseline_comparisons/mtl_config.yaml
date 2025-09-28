@@ -32,23 +32,27 @@ data:
   # The factory will first check if this is a valid local path. If not, it assumes
   # it's a Hugging Face Hub dataset ID.
   dataset_name: "./dataset/coralscapes/"
-  
+
   # Path to the pre-processed PDS-sampled training patches.
   # This is prioritized for the 'train' split, as specified in dataset.py.
   pds_train_path: "./dataset/processed/pds_patches/"
-  
+
   # Path to the raw, full-image dataset. Used for 'val' and 'test' splits,
   # and as a fallback for 'train' if pds_train_path is not found.
-  dataset_name: "./dataset/coralscapes/"
+  data_root_path: "./dataset/coralscapes/"
 
   # The single source of truth for all class and task information.
   # Required for MTL models and for non-MTL models being evaluated on MTL tasks.
   task_definitions_path: "configs/task_definitions.yaml"
   
   # Parameters for the final DataLoader object.
-  batch_size: 8
-  num_workers: 4
-  
+  # Use batch_size_per_gpu (factory fallback to batch_size if missing)
+  batch_size_per_gpu: 8
+  num_workers: 24
+  persistent_workers: true
+  prefetch_factor: 3
+  drop_last: true
+
   # A fundamental parameter shared by datasets and augmentations.
   patch_size: 512
 
@@ -80,7 +84,7 @@ loss:
   weighting_strategy:
     type: "DWA"           
 
-# -----------------------------s---------------------------------------------
+# --------------------------------------------------------------------------
 # Configuration for Metrics
 # --------------------------------------------------------------------------
 
@@ -101,7 +105,7 @@ metrics:
 optimizer:
   # This type is mapped to the `create_optimizer_and_scheduler` function.
   type: "AdamWPolyDecay"
-  use_pcgrad_wrapper: true  # Enable PCGrad
+  use_pcgrad_wrapper: false  # Disable PCGrad to enable AMP and reduce backward overhead
   params:
     lr: 6.0e-5
     weight_decay: 0.01
@@ -127,8 +131,10 @@ trainer:
   # Number of steps to accumulate gradients before performing an optimizer step.
   gradient_accumulation_steps: 1
   
-  # Enable mixed precision training (FP16) for faster training on compatible hardware
+  # Enable mixed precision training for faster training on compatible hardware
   use_mixed_precision: true
+  # Prefer bf16 on RTX 50xx for stability and speed
+  mixed_precision_dtype: bf16
   
   # The key metric from the validation results used for selecting the best model.
   model_selection_metric: "global.mIoU"
@@ -161,7 +167,7 @@ evaluator:
 
 metrics_processor:
   # Master switch to enable/disable the advanced metrics processing
-  enabled: true
+  enabled: false  # Disable during training; re-enable for final evaluation runs
   
   # Number of CPU worker processes for parallel computation
   # Recommend: Number of physical CPU cores (e.g., 30+ for high-end systems)

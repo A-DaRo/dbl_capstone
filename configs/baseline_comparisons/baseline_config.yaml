@@ -32,9 +32,13 @@ data:
   task_definitions_path: "configs/task_definitions.yaml"
   
   # Parameters for the final DataLoader object.
-  batch_size: 8
-  num_workers: 4
-  
+  # Use batch_size_per_gpu (factory fallback to batch_size if missing)
+  batch_size_per_gpu: 8
+  num_workers: 24
+  persistent_workers: true
+  prefetch_factor: 3
+  drop_last: true
+
   # A fundamental parameter shared by datasets and augmentations.
   patch_size: 512
 
@@ -109,8 +113,10 @@ trainer:
   # Number of steps to accumulate gradients before performing an optimizer step.
   gradient_accumulation_steps: 4
   
-  # Enable mixed precision training (FP16) for faster training on compatible hardware
+  # Enable mixed precision training for faster training on compatible hardware
   use_mixed_precision: true
+  # Prefer bf16 on RTX 50xx for stability and speed
+  mixed_precision_dtype: bf16
   
   # The key metric from the validation results used for selecting the best model.
   # Should be 'H-Mean' for MTL models or a task-specific 'mIoU_{task_name}' for baselines.
@@ -144,7 +150,7 @@ evaluator:
 
 metrics_processor:
   # Master switch to enable/disable the advanced metrics processing
-  enabled: true
+  enabled: false  # Disable during training; re-enable for final evaluation runs
   
   # Number of CPU worker processes for parallel computation
   # Recommend: Number of physical CPU cores (e.g., 30+ for high-end systems)

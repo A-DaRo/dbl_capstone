@@ -42,8 +42,22 @@ class Trainer:
         self.device = torch.device(config.device)
         self.output_dir = Path(config.output_dir)
         
+        # Configure math modes for NVIDIA GPUs
+        if torch.cuda.is_available() and self.device.type == 'cuda':
+            try:
+                # Enable TF32 for Ampere+ (helps with conv matmul throughput)
+                torch.backends.cuda.matmul.allow_tf32 = True
+                torch.backends.cudnn.allow_tf32 = True
+                torch.backends.cudnn.benchmark = True
+            except Exception:
+                pass
+
         # Configure mixed precision based on config and device compatibility
         self.use_mixed_precision = getattr(config, 'use_mixed_precision', False) and (self.device.type == 'cuda')
+        # Allow selecting dtype: 'fp16' (default) or 'bf16' on GPUs that support it
+        self.mixed_precision_dtype = getattr(config, 'mixed_precision_dtype', 'fp16')
+        if self.mixed_precision_dtype not in ('fp16', 'bf16'):
+            self.mixed_precision_dtype = 'fp16'
         pcgrad_cfg = getattr(config, 'pcgrad', None)
         self.pcgrad_enabled = bool(getattr(pcgrad_cfg, 'enabled', False)) if pcgrad_cfg else False
 
@@ -67,17 +81,18 @@ class Trainer:
             if self.pcgrad is None:
                 self.pcgrad = PCGrad(self.optimizer)
 
-        self.scaler = torch.amp.GradScaler(enabled=self.use_mixed_precision)
+        # GradScaler is only used for fp16; bf16 does not need scaling
+        self.scaler = torch.amp.GradScaler(enabled=self.use_mixed_precision and self.mixed_precision_dtype == 'fp16')
         self.weighting_strategy = getattr(self.loss_fn, 'weighting_strategy', None)
         self._shared_params_registered = False
         if not self.pcgrad_enabled:
             self.pcgrad = None
-        
+
         print(f"Training device: {self.device}")
         print(f"Mixed precision (FP16) enabled: {self.use_mixed_precision}")
         if self.metrics_processor:
             print(f"Advanced metrics processing enabled with {self.metrics_processor.num_cpu_workers} workers")
-        
+
         self.best_metric = -1.0
         self.training_log = defaultdict(list)
         self.validation_log = defaultdict(list)
@@ -113,7 +128,9 @@ class Trainer:
             else:
                 masks_for_loss = masks_for_loss.to(self.device, non_blocking=True)
 
-            with torch.amp.autocast(device_type=self.device.type, enabled=self.use_mixed_precision):
+            # Select proper dtype for autocast
+            autocast_dtype = torch.bfloat16 if self.mixed_precision_dtype == 'bf16' else torch.float16
+            with torch.amp.autocast(device_type=self.device.type, dtype=autocast_dtype, enabled=self.use_mixed_precision):
                 predictions = self.model(images)
                 # Branch depending on strategy type
                 if isinstance(getattr(self.loss_fn, 'weighting_strategy', None), GradientUpdateStrategy):
@@ -194,11 +211,17 @@ class Trainer:
                 self.scheduler.step()
             else:
                 total_loss = total_loss / self.config.gradient_accumulation_steps
-                self.scaler.scale(total_loss).backward()
+                if self.mixed_precision_dtype == 'fp16':
+                    self.scaler.scale(total_loss).backward()
+                else:
+                    total_loss.backward()
 
                 if (i + 1) % self.config.gradient_accumulation_steps == 0 or (i + 1) == len(self.train_loader):
-                    self.scaler.step(self.optimizer)
-                    self.scaler.update()
+                    if self.mixed_precision_dtype == 'fp16':
+                        self.scaler.step(self.optimizer)
+                        self.scaler.update()
+                    else:
+                        self.optimizer.step()
                     self.optimizer.zero_grad()
                     self.scheduler.step()
 

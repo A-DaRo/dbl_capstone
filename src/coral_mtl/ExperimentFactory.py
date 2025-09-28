@@ -231,6 +231,18 @@ class ExperimentFactory:
         DatasetClass = CoralscapesMTLDataset if model_type == "CoralMTL" else CoralscapesDataset
         
         self.dataloaders = {}
+        # Resolve common DataLoader kwargs with sensible defaults and fallbacks
+        # Prefer batch_size_per_gpu, else fall back to batch_size, else 4
+        resolved_bs = (
+            data_config.get('batch_size_per_gpu', None)
+            if data_config.get('batch_size_per_gpu', None) is not None
+            else data_config.get('batch_size', 4)
+        )
+        num_workers = int(data_config.get('num_workers', 4))
+        persistent_workers = bool(data_config.get('persistent_workers', num_workers > 0))
+        prefetch_factor = data_config.get('prefetch_factor', None)
+        drop_last_default = True  # usually beneficial for throughput on train
+
         for split in ['train', 'validation', 'test']:
             augs = train_augmentations if split == 'train' else None
             dataset = DatasetClass(
@@ -242,13 +254,23 @@ class ExperimentFactory:
                 data_root_path=data_config.get('data_root_path'),
                 pds_train_path=data_config.get('pds_train_path')
             )
-            self.dataloaders[split] = DataLoader(
-                dataset,
-                batch_size=data_config.get('batch_size_per_gpu', 4),
+
+            # Build DataLoader kwargs incrementally to keep compatibility across PyTorch versions
+            dl_kwargs = dict(
+                batch_size=resolved_bs,
                 shuffle=(split == 'train'),
-                num_workers=data_config.get('num_workers', 4),
-                pin_memory=True
+                num_workers=num_workers,
+                pin_memory=True,
+                drop_last=bool(data_config.get('drop_last', drop_last_default if split == 'train' else False)),
             )
+            # Only set persistent_workers if we actually have workers > 0
+            if num_workers > 0:
+                dl_kwargs['persistent_workers'] = persistent_workers
+                # prefetch_factor applies only when workers > 0
+                if prefetch_factor is not None:
+                    dl_kwargs['prefetch_factor'] = int(prefetch_factor)
+
+            self.dataloaders[split] = DataLoader(dataset, **dl_kwargs)
         return self.dataloaders
     
     def get_optimizer_and_scheduler(self) -> Tuple[Optimizer, Any]:
