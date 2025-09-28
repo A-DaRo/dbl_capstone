@@ -74,7 +74,7 @@ loss:
     focal_gamma: 2.0
     ignore_index: 0
   weighting_strategy:
-    type: "DWA"           # or "pgd" / "auto"
+    type: "DWA"           
 # --------------------------------------------------------------------------
 # Configuration for Metrics
 # --------------------------------------------------------------------------

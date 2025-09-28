@@ -129,6 +129,14 @@ class BaselineComparison:
         else:
             self.logger.info("CUDA available: False")
     
+    @staticmethod
+    def _format_metric_value(value: Any) -> str:
+        """Return a human-readable metric representation."""
+
+        if isinstance(value, (int, float)):
+            return f"{value:.4f}"
+        return "N/A"
+
     def _validate_configs(self):
         """Validate that required config files exist."""
         self.logger.debug("Starting configuration validation")
@@ -183,20 +191,27 @@ class BaselineComparison:
                 'evaluation_completed': False,
                 'training_metrics': None,
                 'test_metrics': None,
-                'error': None
+                'error': None,
+                'skip_training': skip_training
             }
             
             # Log experiment configuration details
             self.logger.debug("Logging experiment configuration details...")
             try:
-                if hasattr(factory, 'config'):
-                    config_obj = factory.config
-                    self.logger.info(f"Model type: {getattr(config_obj, 'model_name', 'Unknown')}")
-                    self.logger.info(f"Device: {getattr(config_obj, 'device', 'Unknown')}")
-                    self.logger.info(f"Batch size: {getattr(config_obj, 'batch_size', 'Unknown')}")
-                    self.logger.info(f"Learning rate: {getattr(config_obj, 'learning_rate', 'Unknown')}")
-                    self.logger.info(f"Number of epochs: {getattr(config_obj, 'num_epochs', 'Unknown')}")
-                    self.logger.info(f"Output directory: {getattr(config_obj, 'output_dir', 'Unknown')}")
+                config_dict = getattr(factory, 'config', {})
+                if isinstance(config_dict, dict):
+                    model_cfg = config_dict.get('model', {})
+                    trainer_cfg = config_dict.get('trainer', {})
+                    optimizer_cfg = config_dict.get('optimizer', {})
+
+                    self.logger.info(f"Model type: {model_cfg.get('type', 'Unknown')}")
+                    self.logger.info(f"Primary tasks: {model_cfg.get('tasks', {}).get('primary', [])}")
+                    self.logger.info(f"Auxiliary tasks: {model_cfg.get('tasks', {}).get('auxiliary', [])}")
+                    self.logger.info(f"Device policy: {trainer_cfg.get('device', 'auto')}")
+                    self.logger.info(f"Batch size per GPU: {config_dict.get('data', {}).get('batch_size_per_gpu', 'Unknown')}")
+                    self.logger.info(f"Learning rate: {optimizer_cfg.get('params', {}).get('lr', 'Unknown')}")
+                    self.logger.info(f"Epochs: {trainer_cfg.get('epochs', 'Unknown')}")
+                    self.logger.info(f"Output directory: {trainer_cfg.get('output_dir', 'Unknown')}")
             except Exception as e:
                 self.logger.warning(f"Could not log config details: {str(e)}")
             
@@ -224,6 +239,7 @@ class BaselineComparison:
                     return experiment_results
             else:
                 self.logger.info(f"⏭️  Skipping training for {experiment_name} (evaluation only)")
+                experiment_results['training_completed'] = True
             
             # Phase 2: Final Testing & Evaluation
             self.logger.info(f"🔍 Phase 2: Final Testing & Evaluation for {experiment_name}")
@@ -280,14 +296,24 @@ class BaselineComparison:
         # Global metrics (always present)
         if 'global' in metrics:
             global_metrics = metrics['global']
-            self.logger.info(f"   Global mIoU: {global_metrics.get('mIoU', 'N/A'):.4f}")
-            self.logger.info(f"   Global BIoU: {global_metrics.get('BIoU', 'N/A'):.4f}")
+            self.logger.info(
+                f"   Global mIoU: {self._format_metric_value(global_metrics.get('mIoU'))}"
+            )
+            self.logger.info(
+                f"   Global BIoU: {self._format_metric_value(global_metrics.get('BIoU'))}"
+            )
             self.logger.debug(f"   Global pixel accuracy: {global_metrics.get('pixel_accuracy', 'N/A')}")
             if 'TIDE_errors' in global_metrics and global_metrics['TIDE_errors']:
                 tide = global_metrics['TIDE_errors']
-                self.logger.debug(f"   Global TIDE - Classification error: {tide.get('classification_error', 'N/A'):.4f}")
-                self.logger.debug(f"   Global TIDE - Background error: {tide.get('background_error', 'N/A'):.4f}")
-                self.logger.debug(f"   Global TIDE - Missed error: {tide.get('missed_error', 'N/A'):.4f}")
+                self.logger.debug(
+                    f"   Global TIDE - Classification error: {self._format_metric_value(tide.get('classification_error'))}"
+                )
+                self.logger.debug(
+                    f"   Global TIDE - Background error: {self._format_metric_value(tide.get('background_error'))}"
+                )
+                self.logger.debug(
+                    f"   Global TIDE - Missed error: {self._format_metric_value(tide.get('missed_error'))}"
+                )
         
         # Task-specific metrics (for MTL models)
         task_metrics = [k for k in metrics.keys() if k != 'global']
@@ -295,9 +321,9 @@ class BaselineComparison:
             self.logger.info("   Task-specific metrics:")
             for task in task_metrics:
                 if isinstance(metrics[task], dict):
-                    miou = metrics[task].get('mIoU', 'N/A')
-                    biou = metrics[task].get('BIoU', 'N/A')
-                    self.logger.info(f"     {task}: mIoU={miou:.4f}, BIoU={biou:.4f}")
+                    miou = self._format_metric_value(metrics[task].get('mIoU'))
+                    biou = self._format_metric_value(metrics[task].get('BIoU'))
+                    self.logger.info(f"     {task}: mIoU={miou}, BIoU={biou}")
                     self.logger.debug(f"     {task} detailed metrics: {json.dumps(metrics[task], indent=2, default=str)}")
         
         # Log optimization metrics if available
@@ -394,7 +420,10 @@ class BaselineComparison:
         
         for mode, experiment in results['experiments'].items():
             summary[mode] = {
-                'success': experiment['training_completed'] and experiment['evaluation_completed'],
+                'success': (
+                    experiment.get('evaluation_completed', False)
+                    and (experiment.get('training_completed', False) or experiment.get('skip_training', False))
+                ),
                 'error': experiment.get('error'),
                 'key_metrics': {}
             }
@@ -562,7 +591,7 @@ def main():
                 sys.exit(1)
         else:
             # Multiple configs mode
-            modes = ['baseline', 'mtl'] if args.mode == 'both' else [args.mode]
+            modes = ['mtl', 'baseline'] if args.mode == 'both' else [args.mode]
             
             checkpoint_paths = {}
             if args.checkpoint_baseline:
