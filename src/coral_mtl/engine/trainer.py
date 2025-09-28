@@ -7,11 +7,14 @@ import optuna
 from pathlib import Path
 import json
 from typing import Dict, Any, List, Optional, Tuple
+from types import SimpleNamespace
+import warnings
 
 from .inference import SlidingWindowInferrer
 from ..metrics.metrics import AbstractCoralMetrics
 from ..metrics.metrics_storer import MetricsStorer, AdvancedMetricsProcessor
 from .gradient_strategies import GradientUpdateStrategy
+from .pcgrad import PCGrad
 
 class Trainer:
     """
@@ -43,17 +46,31 @@ class Trainer:
         self.use_mixed_precision = getattr(config, 'use_mixed_precision', False) and (self.device.type == 'cuda')
         pcgrad_cfg = getattr(config, 'pcgrad', None)
         self.pcgrad_enabled = bool(getattr(pcgrad_cfg, 'enabled', False)) if pcgrad_cfg else False
+
+        self.pcgrad: Optional[PCGrad] = None
+        optimizer_is_pcgrad = isinstance(self.optimizer, PCGrad)
+        if optimizer_is_pcgrad:
+            # Unwrap optimizer returned by the factory while keeping the wrapper for projected steps
+            self.pcgrad = self.optimizer
+            self.optimizer = self.optimizer.optimizer
+            if pcgrad_cfg is None:
+                setattr(self.config, 'pcgrad', SimpleNamespace(enabled=True))
+                pcgrad_cfg = self.config.pcgrad
+            elif not getattr(pcgrad_cfg, 'enabled', False):
+                setattr(pcgrad_cfg, 'enabled', True)
+            self.pcgrad_enabled = True
+
         if self.pcgrad_enabled:
             if getattr(config, 'gradient_accumulation_steps', 1) != 1:
                 raise ValueError("PCGrad currently requires gradient_accumulation_steps == 1")
             self.use_mixed_precision = False
+            if self.pcgrad is None:
+                self.pcgrad = PCGrad(self.optimizer)
+
         self.scaler = torch.amp.GradScaler(enabled=self.use_mixed_precision)
         self.weighting_strategy = getattr(self.loss_fn, 'weighting_strategy', None)
         self._shared_params_registered = False
-        if self.pcgrad_enabled:
-            from .pcgrad import PCGrad
-            self.pcgrad = PCGrad(self.optimizer)
-        else:
+        if not self.pcgrad_enabled:
             self.pcgrad = None
         
         print(f"Training device: {self.device}")
@@ -205,17 +222,30 @@ class Trainer:
                 key = f'weighted_{task}_loss'
                 val = loss_dict.get(key)
                 if isinstance(val, torch.Tensor):
-                    losses.append(val)
+                    if val.requires_grad:
+                        losses.append(val)
+                    else:
+                        warnings.warn(
+                            f"Skipping PCGrad component '{key}' without gradients",
+                            RuntimeWarning
+                        )
         return losses
 
     def _apply_pcgrad(self, loss_dict_or_tensor: Any) -> None:
         if not isinstance(loss_dict_or_tensor, dict):
             raise ValueError("PCGrad requires loss function to return a dict with weighted components")
         task_losses = self._collect_weighted_task_losses(loss_dict_or_tensor)
-        if 'consistency_loss' in loss_dict_or_tensor:
-            task_losses.append(self.loss_fn.w_consistency * loss_dict_or_tensor['consistency_loss'])
+        consistency = loss_dict_or_tensor.get('consistency_loss')
+        if isinstance(consistency, torch.Tensor) and consistency.requires_grad:
+            task_losses.append(self.loss_fn.w_consistency * consistency)
+        elif isinstance(consistency, torch.Tensor) and not consistency.requires_grad and self.loss_fn.w_consistency:
+            warnings.warn("Consistency loss lacks gradients; excluded from PCGrad update", RuntimeWarning)
         if not task_losses:
-            task_losses.append(loss_dict_or_tensor['total_loss'])
+            total_loss = loss_dict_or_tensor.get('total_loss')
+            if isinstance(total_loss, torch.Tensor) and total_loss.requires_grad:
+                task_losses.append(total_loss)
+            else:
+                raise RuntimeError("PCGrad received no differentiable losses for gradient computation")
         params = [p for p in self.model.parameters() if p.requires_grad]
         task_grads = [
             torch.autograd.grad(loss, params, retain_graph=True, allow_unused=True)

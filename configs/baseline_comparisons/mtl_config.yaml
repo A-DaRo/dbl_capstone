@@ -136,7 +136,7 @@ trainer:
   use_mixed_precision: true
   
   # The key metric from the validation results used for selecting the best model.
-  model_selection_metric: "global.BIoU"
+  model_selection_metric: "global.mIoU"
   
   # --- Parameters for the SlidingWindowInferrer used during validation ---
   # The step size for the sliding window. Optimized for 33% overlap (balance of speed/accuracy)

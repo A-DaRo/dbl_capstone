@@ -3,18 +3,18 @@
     "genus": {
       "ungrouped": {
         "task_summary": {
-          "mIoU": 3.860212691285602e-06,
-          "mPrecision": 0.004702194357366771,
-          "mRecall": 1.3522965375949707e-05,
-          "mF1-Score": 0.00010808011438478774,
-          "pixel_accuracy": 1.7166137695308407e-05
+          "mIoU": 0.021453741767039722,
+          "mPrecision": 0.11428318647658653,
+          "mRecall": 0.1784608511326219,
+          "mF1-Score": 0.21894652109619286,
+          "pixel_accuracy": 0.22726774215692822
         },
         "per_class": {
           "unlabeled": {
-            "IoU": 0.0,
-            "Precision": NaN,
-            "Recall": 0.0,
-            "F1-Score": NaN,
+            "IoU": 0.0022564091105450536,
+            "Precision": 0.9455368289637952,
+            "Recall": 0.0022567024136175362,
+            "F1-Score": 0.0045026583816959774,
             "support": 2684891
           },
           "other coral dead": {
@@ -33,16 +33,16 @@
           },
           "other coral alive": {
             "IoU": 0.0,
-            "Precision": 0.0,
+            "Precision": NaN,
             "Recall": 0.0,
             "F1-Score": NaN,
             "support": 48922
           },
           "massive/meandering bleached": {
-            "IoU": 5.404297767799843e-05,
-            "Precision": 0.05642633228840126,
-            "Recall": 5.409186150379883e-05,
-            "F1-Score": 0.00010808011438478774,
+            "IoU": 0.27664223386097136,
+            "Precision": 0.31157822227865656,
+            "Recall": 0.71158670211687,
+            "F1-Score": 0.4333903838106897,
             "support": 1331069
           },
           "massive/meandering alive": {
@@ -60,8 +60,8 @@
             "support": 0
           },
           "branching dead": {
-            "IoU": 0.0,
-            "Precision": 0.0,
+            "IoU": NaN,
+            "Precision": NaN,
             "Recall": NaN,
             "F1-Score": NaN,
             "support": 0
@@ -81,15 +81,15 @@
             "support": 129422
           },
           "acropora alive": {
-            "IoU": 0.0,
-            "Precision": 0.0,
+            "IoU": NaN,
+            "Precision": NaN,
             "Recall": NaN,
             "F1-Score": NaN,
             "support": 0
           },
           "table acropora alive": {
-            "IoU": NaN,
-            "Precision": NaN,
+            "IoU": 0.0,
+            "Precision": 0.0,
             "Recall": NaN,
             "F1-Score": NaN,
             "support": 0
@@ -138,40 +138,40 @@
           }
         },
         "TIDE_errors": {
-          "classification_error": 0.3598549365996456,
-          "background_error": 0.6401278972624206,
-          "missed_error": 0.0
+          "classification_error": 0.1339657306670823,
+          "background_error": 0.6386833190916446,
+          "missed_error": 8.320808410642547e-05
         },
-        "BIoU": 0.0013538907713378076
+        "BIoU": 0.01789349739070991
       },
       "grouped": {
         "task_summary": {
-          "mIoU": 0.0007688641811178895,
-          "mPrecision": 0.007919275282345489,
-          "mRecall": 0.15119586130776658,
-          "mF1-Score": 0.006872893265517745,
-          "pixel_accuracy": 0.005307197570799516
+          "mIoU": 0.03781560332605423,
+          "mPrecision": 0.16092732870873125,
+          "mRecall": 0.23795028453339262,
+          "mF1-Score": 0.15545521887526184,
+          "pixel_accuracy": 0.24922060966485757
         },
         "per_class": {
           "unlabeled": {
-            "IoU": 0.0,
-            "Precision": NaN,
-            "Recall": 0.0,
-            "F1-Score": NaN,
+            "IoU": 0.0022564091105450536,
+            "Precision": 0.9455368289637952,
+            "Recall": 0.0022567024136175362,
+            "F1-Score": 0.0045026583816959774,
             "support": 2684891
           },
           "other coral": {
-            "IoU": 0.006870519747944696,
-            "Precision": 0.0069278699703626545,
-            "Recall": 0.4535382854339561,
-            "F1-Score": 0.013647275619241749,
+            "IoU": 8.504486116426415e-06,
+            "Precision": 1.4563672375626238e-05,
+            "Recall": 2.0440701524876334e-05,
+            "F1-Score": 1.7008827581514806e-05,
             "support": 48922
           },
           "massive/meandering": {
-            "IoU": 4.925788211631017e-05,
-            "Precision": 0.05642633228840126,
-            "Recall": 4.9298489343652236e-05,
-            "F1-Score": 9.851091179374004e-05,
+            "IoU": 0.30025991301177235,
+            "Precision": 0.3418672370336792,
+            "Recall": 0.7115737104850355,
+            "F1-Score": 0.461845989416508,
             "support": 1460491
           },
           "branching": {
@@ -182,8 +182,8 @@
             "support": 0
           },
           "acropora": {
-            "IoU": 0.0,
-            "Precision": 0.0,
+            "IoU": NaN,
+            "Precision": NaN,
             "Recall": NaN,
             "F1-Score": NaN,
             "support": 0
@@ -218,28 +218,28 @@
           }
         },
         "TIDE_errors": {
-          "classification_error": 0.35456490516654143,
-          "background_error": 0.6401278972624206,
-          "missed_error": 0.0
+          "classification_error": 0.11201286315915297,
+          "background_error": 0.6386833190916446,
+          "missed_error": 8.320808410642547e-05
         },
-        "BIoU": 0.006452454387805929
+        "BIoU": 0.01513474475816183
       }
     },
     "health": {
       "ungrouped": {
         "task_summary": {
-          "mIoU": 0.002377878645640261,
-          "mPrecision": 0.03676945135928226,
-          "mRecall": 0.008688880891974796,
-          "mF1-Score": 0.06443552408358148,
-          "pixel_accuracy": 0.011029720306393855
+          "mIoU": 0.030477351671001178,
+          "mPrecision": 0.0863234639480803,
+          "mRecall": 0.1221276823383418,
+          "mF1-Score": 0.17109038375651056,
+          "pixel_accuracy": 0.2116520404815169
         },
         "per_class": {
           "unlabeled": {
-            "IoU": 0.0,
-            "Precision": NaN,
-            "Recall": 0.0,
-            "F1-Score": NaN,
+            "IoU": 0.2326949482620909,
+            "Precision": 0.5417670190433871,
+            "Recall": 0.2897156718838865,
+            "F1-Score": 0.3775385769044559,
             "support": 2684891
           },
           "other coral dead": {
@@ -257,29 +257,29 @@
             "support": 0
           },
           "other coral alive": {
-            "IoU": 0.0,
-            "Precision": 0.0,
-            "Recall": 0.0,
-            "F1-Score": NaN,
+            "IoU": 0.005262899854254044,
+            "Precision": 0.0054727627162478205,
+            "Recall": 0.12068190180286988,
+            "F1-Score": 0.01047069349722759,
             "support": 48922
           },
           "massive/meandering bleached": {
-            "IoU": 0.03329030103896365,
-            "Precision": 0.44123341631138707,
-            "Recall": 0.03475552356789918,
-            "F1-Score": 0.06443552408358148,
+            "IoU": 0.06681566859366686,
+            "Precision": 0.31599485772116814,
+            "Recall": 0.07811315566661083,
+            "F1-Score": 0.1252618808678482,
             "support": 1331069
           },
           "massive/meandering alive": {
-            "IoU": 0.0,
-            "Precision": 0.0,
+            "IoU": NaN,
+            "Precision": NaN,
             "Recall": NaN,
             "F1-Score": NaN,
             "support": 0
           },
           "branching bleached": {
-            "IoU": NaN,
-            "Precision": NaN,
+            "IoU": 0.0,
+            "Precision": 0.0,
             "Recall": NaN,
             "F1-Score": NaN,
             "support": 0
@@ -292,64 +292,64 @@
             "support": 0
           },
           "branching alive": {
-            "IoU": 0.0,
-            "Precision": 0.0,
+            "IoU": NaN,
+            "Precision": NaN,
             "Recall": NaN,
             "F1-Score": NaN,
             "support": 0
           },
           "massive/meandering dead": {
             "IoU": 0.0,
-            "Precision": NaN,
+            "Precision": 0.0,
             "Recall": 0.0,
             "F1-Score": NaN,
             "support": 129422
           },
           "acropora alive": {
-            "IoU": 0.0,
-            "Precision": 0.0,
+            "IoU": NaN,
+            "Precision": NaN,
             "Recall": NaN,
             "F1-Score": NaN,
             "support": 0
           },
           "table acropora alive": {
-            "IoU": NaN,
-            "Precision": NaN,
+            "IoU": 0.0,
+            "Precision": 0.0,
             "Recall": NaN,
             "F1-Score": NaN,
             "support": 0
           },
           "pocillopora alive": {
-            "IoU": 0.0,
-            "Precision": 0.0,
+            "IoU": NaN,
+            "Precision": NaN,
             "Recall": NaN,
             "F1-Score": NaN,
             "support": 0
           },
           "table acropora dead": {
-            "IoU": 0.0,
-            "Precision": 0.0,
+            "IoU": NaN,
+            "Precision": NaN,
             "Recall": NaN,
             "F1-Score": NaN,
             "support": 0
           },
           "meandering bleached": {
-            "IoU": 0.0,
-            "Precision": 0.0,
+            "IoU": NaN,
+            "Precision": NaN,
             "Recall": NaN,
             "F1-Score": NaN,
             "support": 0
           },
           "stylophora alive": {
-            "IoU": 0.0,
-            "Precision": 0.0,
+            "IoU": NaN,
+            "Precision": NaN,
             "Recall": NaN,
             "F1-Score": NaN,
             "support": 0
           },
           "meandering alive": {
-            "IoU": NaN,
-            "Precision": NaN,
+            "IoU": 0.0,
+            "Precision": 0.0,
             "Recall": NaN,
             "F1-Score": NaN,
             "support": 0
@@ -363,106 +363,106 @@
           }
         },
         "TIDE_errors": {
-          "classification_error": 0.34884238243094706,
-          "background_error": 0.6401278972624206,
-          "missed_error": 0.0
+          "classification_error": 0.17681503295894221,
+          "background_error": 0.45467281341541893,
+          "missed_error": 0.15686011314388348
         },
-        "BIoU": 0.007311933612988328
+        "BIoU": 0.005709010774569028
       },
       "grouped": {
         "task_summary": {
-          "mIoU": 0.012590777524093892,
-          "mPrecision": 0.1323261423957037,
-          "mRecall": 0.2599748489180364,
-          "mF1-Score": 0.04880646223702538,
-          "pixel_accuracy": 0.024600982666009758
+          "mIoU": 0.0995041830760073,
+          "mPrecision": 0.24380790159916102,
+          "mRecall": 0.17304830735020987,
+          "mF1-Score": 0.1658952445486134,
+          "pixel_accuracy": 0.25273609161370925
         },
         "per_class": {
           "unlabeled": {
-            "IoU": 0.0,
-            "Precision": NaN,
-            "Recall": 0.0,
-            "F1-Score": NaN,
+            "IoU": 0.2326949482620909,
+            "Precision": 0.5417670190433871,
+            "Recall": 0.2897156718838865,
+            "F1-Score": 0.3775385769044559,
             "support": 2684891
           },
           "alive coral": {
-            "IoU": 0.012061402155891118,
-            "Precision": 0.012061533116160919,
-            "Recall": 0.9991006091329054,
-            "F1-Score": 0.02383531696831426,
+            "IoU": 0.004484731143312034,
+            "Precision": 0.00456785313735907,
+            "Recall": 0.19772290585012878,
+            "F1-Score": 0.008929416255451647,
             "support": 48922
           },
           "bleached coral": {
-            "IoU": 0.03830170794048445,
-            "Precision": 0.38491689407095014,
-            "Recall": 0.04079878653924027,
-            "F1-Score": 0.0737776075057365,
+            "IoU": 0.16082216275069267,
+            "Precision": 0.42848832090162386,
+            "Recall": 0.204739198343587,
+            "F1-Score": 0.2770832051821052,
             "support": 1331069
           },
           "dead coral": {
-            "IoU": 0.0,
-            "Precision": 0.0,
-            "Recall": 0.0,
-            "F1-Score": NaN,
+            "IoU": 1.489014793361972e-05,
+            "Precision": 0.0004084133142740453,
+            "Recall": 1.545332323716215e-05,
+            "F1-Score": 2.977985244083115e-05,
             "support": 129422
           }
         },
         "TIDE_errors": {
-          "classification_error": 0.3352711200713312,
-          "background_error": 0.6401278972624206,
-          "missed_error": 0.0
+          "classification_error": 0.13573098182674986,
+          "background_error": 0.45467281341541893,
+          "missed_error": 0.15686011314388348
         },
-        "BIoU": 0.008863759877303356
+        "BIoU": 0.012138747834459522
       }
     },
     "fish": {
       "ungrouped": {
         "task_summary": {
-          "mIoU": 0.4856635629505817,
-          "mPrecision": 0.5077798696268693,
-          "mRecall": 0.6205417868296068,
-          "mF1-Score": 0.5049358050281756,
-          "pixel_accuracy": 0.954497337341081
+          "mIoU": 0.31152157491763455,
+          "mPrecision": 0.49860444885461347,
+          "mRecall": 0.3802531370652489,
+          "mF1-Score": 0.38448822114528525,
+          "pixel_accuracy": 0.6221921443937726
         },
         "per_class": {
           "unlabeled": {
-            "IoU": 0.9544617910155737,
-            "Precision": 0.9979483095757362,
-            "Recall": 0.9563384005856356,
-            "F1-Score": 0.9767003841191678,
+            "IoU": 0.62205022075121,
+            "Precision": 0.9962097179881979,
+            "Recall": 0.6235259297227747,
+            "F1-Score": 0.7669925539828524,
             "support": 4182806
           },
           "fish": {
-            "IoU": 0.01686533488558977,
-            "Precision": 0.017611429678002388,
-            "Recall": 0.284745173073578,
-            "F1-Score": 0.03317122593718338,
+            "IoU": 0.0009929290840591698,
+            "Precision": 0.0009991797210290219,
+            "Recall": 0.13698034440772308,
+            "F1-Score": 0.001983888307718081,
             "support": 11498
           }
         },
         "TIDE_errors": {
           "classification_error": 0.0,
-          "background_error": 0.043541908264149776,
-          "missed_error": 0.0019607543945307825
+          "background_error": 0.37544202804556476,
+          "missed_error": 0.0023658275604242405
         },
-        "BIoU": 0.007169676684918366
+        "BIoU": 0.002325657482176342
       }
     },
     "human_artifacts": {
       "ungrouped": {
         "task_summary": {
-          "mIoU": 0.023057223700151862,
-          "mPrecision": 0.2508167383210442,
-          "mRecall": 0.10179302572986579,
-          "mF1-Score": 0.08515955089150726,
-          "pixel_accuracy": 0.08809900283811375
+          "mIoU": 0.007320119858729939,
+          "mPrecision": 0.2572954756278492,
+          "mRecall": 0.4529859322808692,
+          "mF1-Score": 0.02845793704179163,
+          "pixel_accuracy": 0.017351627349849377
         },
         "per_class": {
           "unlabeled": {
-            "IoU": 0.0875472435338868,
-            "Precision": 0.9984121397871214,
-            "Recall": 0.0875594347727292,
-            "F1-Score": 0.16099943069950676,
+            "IoU": 0.00018688613433686407,
+            "Precision": 1.0,
+            "Recall": 0.00018688613433686407,
+            "F1-Score": 0.0003737024288714041,
             "support": 4114805
           },
           "human": {
@@ -480,36 +480,36 @@
             "support": 0
           },
           "transect line": {
-            "IoU": 0.004681651266720636,
-            "Precision": 0.004854813497055217,
-            "Recall": 0.11602661668700236,
-            "F1-Score": 0.00931967108350775,
+            "IoU": 0.02909359330058289,
+            "Precision": 0.029181902511396744,
+            "Recall": 0.9057849784274016,
+            "F1-Score": 0.05654217165471185,
             "support": 79499
           }
         },
         "TIDE_errors": {
-          "classification_error": 0.016618251800533147,
-          "background_error": 0.8951461315152894,
-          "missed_error": 0.00013661384582516273
+          "classification_error": 0.0017857551574702773,
+          "background_error": 0.9808626174924419,
+          "missed_error": 0.0
         },
-        "BIoU": 0.004300870587571816
+        "BIoU": 0.0013026651079556394
       }
     },
     "substrate": {
       "ungrouped": {
         "task_summary": {
-          "mIoU": 0.004929231950911624,
-          "mPrecision": 0.1843254312877338,
-          "mRecall": 0.06075463909191223,
-          "mF1-Score": 0.014509347693200541,
-          "pixel_accuracy": 0.0031244754791252315
+          "mIoU": 0.05562158114519106,
+          "mPrecision": 0.22639131224953937,
+          "mRecall": 0.16435809403158008,
+          "mF1-Score": 0.12922324655533313,
+          "pixel_accuracy": 0.28868055343621046
         },
         "per_class": {
           "unlabeled": {
-            "IoU": 0.0006307087386141486,
-            "Precision": 0.875784190715182,
-            "Recall": 0.0006307651642316391,
-            "F1-Score": 0.0012606223916697785,
+            "IoU": 0.009220763331483823,
+            "Precision": 0.9183453237410072,
+            "Recall": 0.00922832930821418,
+            "F1-Score": 0.01827303532885246,
             "support": 2213185
           },
           "seagrass": {
@@ -527,90 +527,90 @@
             "support": 0
           },
           "algae covered substrate": {
-            "IoU": 0.02340874005462534,
-            "Precision": 0.15744808306709265,
-            "Recall": 0.026761017495630333,
-            "F1-Score": 0.04574660961636086,
+            "IoU": 0.0003219640255860083,
+            "Precision": 0.0003447216011474649,
+            "Recall": 0.004853298036620339,
+            "F1-Score": 0.000643720796233108,
             "support": 58929
           },
           "unknown hard substrate": {
-            "IoU": 0.0010903295711910466,
-            "Precision": 0.06820113777545282,
-            "Recall": 0.0011068174329582215,
-            "F1-Score": 0.0021782840948190566,
+            "IoU": 0.3141519132346887,
+            "Precision": 0.38477242405375467,
+            "Recall": 0.631219679914341,
+            "F1-Score": 0.4781059329152088,
             "support": 1884683
           },
           "rubble": {
-            "IoU": 0.00444561334103921,
-            "Precision": 0.00451917616867547,
-            "Recall": 0.2145199562748287,
-            "F1-Score": 0.008851874669952473,
+            "IoU": 0.010034846279387765,
+            "Precision": 0.0548854041013269,
+            "Recall": 0.0121310688671448,
+            "F1-Score": 0.019870297181038058,
             "support": 37507
           }
         },
         "TIDE_errors": {
-          "classification_error": 0.46949672698963413,
-          "background_error": 0.52733159065234,
-          "missed_error": 4.720687866209812e-05
+          "classification_error": 0.18809151649470612,
+          "background_error": 0.5227949619291966,
+          "missed_error": 0.00043296813964833423
         },
-        "BIoU": 0.007086821859683317
+        "BIoU": 0.010212368560082279
       }
     },
     "background": {
       "ungrouped": {
         "task_summary": {
-          "mIoU": 0.10842915926330365,
-          "mPrecision": 0.31630352948391377,
-          "mRecall": 0.3216954299400783,
-          "mF1-Score": 0.17516807385513825,
-          "pixel_accuracy": 0.27312946319573567
+          "mIoU": 0.006928484339260427,
+          "mPrecision": 0.3402615454307036,
+          "mRecall": 0.33333360557522357,
+          "mF1-Score": 0.020362248072176473,
+          "pixel_accuracy": 0.02078533172606926
         },
         "per_class": {
           "unlabeled": {
-            "IoU": 0.2807962233467274,
-            "Precision": 0.8936523556087818,
-            "Recall": 0.2905036039381423,
-            "F1-Score": 0.4384713481009576,
+            "IoU": 8.167256705589997e-07,
+            "Precision": 1.0,
+            "Recall": 8.167256705589997e-07,
+            "F1-Score": 1.633450007037447e-06,
             "support": 3673204
           },
           "background": {
-            "IoU": 0.020365242790304248,
-            "Precision": 0.030766619702666715,
-            "Recall": 0.05681653196534869,
-            "F1-Score": 0.039917554883804524,
+            "IoU": 0.0,
+            "Precision": 0.0,
+            "Recall": 0.0,
+            "F1-Score": NaN,
             "support": 433923
           },
           "dark": {
-            "IoU": 0.02412601165287931,
-            "Precision": 0.024491613140292762,
-            "Recall": 0.617766153916744,
-            "F1-Score": 0.04711531858065267,
+            "IoU": 0.020784636292110723,
+            "Precision": 0.020784636292110723,
+            "Recall": 1.0,
+            "F1-Score": 0.040722862694345906,
             "support": 87177
           }
         },
         "TIDE_errors": {
-          "classification_error": 0.07524609565733069,
-          "background_error": 0.6213486194609114,
-          "missed_error": 0.030275821685783796
+          "classification_error": 0.10345530509946263,
+          "background_error": 0.8757593631742296,
+          "missed_error": 0.0
         },
-        "BIoU": 0.005386546398327544
+        "BIoU": 0.0
       }
     },
     "biota": {
       "ungrouped": {
         "task_summary": {
-          "mIoU": 0.0019417877114066295,
-          "mPrecision": 0.08342019601887467,
-          "mRecall": 0.02037977330339951,
-          "mF1-Score": 0.022910235799731275,
-          "pixel_accuracy": 0.019736289978022636
+          "mIoU": 0.02079869190165434,
+          "mPrecision": 0.08396908428760992,
+          "mRecall": 0.20373884403470713,
+          "mF1-Score": 0.13625185668239548,
+          "pixel_accuracy": 0.2367322444915207
         },
         "per_class": {
           "unlabeled": {
-            "IoU": 0.019625721300984753,
-            "Precision": 0.997025732291527,
-            "Recall": 0.01962687038126179,
-            "F1-Score": 0.03849593216605686,
+            "IoU": 0.2359047981631835,
+            "Precision": 0.993598062465311,
+            "Recall": 0.23626391425443063,
+            "F1-Score": 0.3817523785226629,
             "support": 4167399
           },
           "trash": {
@@ -621,10 +621,10 @@
             "support": 0
           },
           "other animal": {
-            "IoU": 0.0,
-            "Precision": 0.0,
-            "Recall": 0.0,
-            "F1-Score": NaN,
+            "IoU": 0.00025446371771491584,
+            "Precision": 0.0002566691192826954,
+            "Recall": 0.028763183125599234,
+            "F1-Score": 0.0005087979648081408,
             "support": 3129
           },
           "millepora": {
@@ -677,10 +677,10 @@
             "support": 0
           },
           "crown of thorn": {
-            "IoU": 0.0036757312358948004,
-            "Precision": 0.004016619934969011,
-            "Recall": 0.04151244952893674,
-            "F1-Score": 0.007324539433405689,
+            "IoU": 0.013425040938953659,
+            "Precision": 0.01377427986672535,
+            "Recall": 0.3461894347240915,
+            "F1-Score": 0.02649439355971539,
             "support": 23776
           },
           "dead clam": {
@@ -692,21 +692,21 @@
           }
         },
         "TIDE_errors": {
-          "classification_error": 0.006121158599852056,
-          "background_error": 0.9740843772885861,
-          "missed_error": 5.817413330076738e-05
+          "classification_error": 0.002918243408202429,
+          "background_error": 0.7588369846342184,
+          "missed_error": 0.001512527465819952
         },
-        "BIoU": 0.002212188248106385
+        "BIoU": 0.0015391234043155924
       }
     }
   },
   "global_summary": {
     "task_summary": {
-      "mIoU": 2.3496946816521055e-06,
-      "mPrecision": 0.004702194357366771,
-      "mRecall": 4.1609124233691405e-06,
-      "mF1-Score": 0.00010808011438478774,
-      "pixel_accuracy": 1.7166137695308407e-05
+      "mIoU": 0.012593813187581066,
+      "mPrecision": 0.028750897292611953,
+      "mRecall": 0.0547730676549087,
+      "mF1-Score": 0.21711667045208682,
+      "pixel_accuracy": 0.22583031654352526
     },
     "per_class": {
       "background": {
@@ -753,7 +753,7 @@
       },
       "other coral alive": {
         "IoU": 0.0,
-        "Precision": 0.0,
+        "Precision": NaN,
         "Recall": 0.0,
         "F1-Score": NaN,
         "support": 48922
@@ -815,10 +815,10 @@
         "support": 79499
       },
       "massive/meandering bleached": {
-        "IoU": 5.404297767799843e-05,
-        "Precision": 0.05642633228840126,
-        "Recall": 5.409186150379883e-05,
-        "F1-Score": 0.00010808011438478774,
+        "IoU": 0.27664223386097136,
+        "Precision": 0.31157822227865656,
+        "Recall": 0.71158670211687,
+        "F1-Score": 0.4333903838106897,
         "support": 1331069
       },
       "massive/meandering alive": {
@@ -843,8 +843,8 @@
         "support": 0
       },
       "branching dead": {
-        "IoU": 0.0,
-        "Precision": 0.0,
+        "IoU": NaN,
+        "Precision": NaN,
         "Recall": NaN,
         "F1-Score": NaN,
         "support": 0
@@ -878,8 +878,8 @@
         "support": 0
       },
       "acropora alive": {
-        "IoU": 0.0,
-        "Precision": 0.0,
+        "IoU": NaN,
+        "Precision": NaN,
         "Recall": NaN,
         "F1-Score": NaN,
         "support": 0
@@ -899,8 +899,8 @@
         "support": 0
       },
       "table acropora alive": {
-        "IoU": NaN,
-        "Precision": NaN,
+        "IoU": 0.0,
+        "Precision": 0.0,
         "Recall": NaN,
         "F1-Score": NaN,
         "support": 0
@@ -984,40 +984,40 @@
       }
     },
     "TIDE_errors": {
-      "classification_error": 0.9845404624936617,
-      "background_error": 0.01544237136840452,
-      "missed_error": 0.0
+      "classification_error": 0.7572138309476955,
+      "background_error": 0.015435218811031475,
+      "missed_error": 0.001520633697509403
     }
   },
   "optimization_metrics": {
-    "tasks.genus.ungrouped.mIoU": 3.860212691285602e-06,
-    "tasks.genus.ungrouped.BIoU": 0.0013538907713378076,
-    "tasks.genus.grouped.mIoU": 0.0007688641811178895,
-    "tasks.genus.grouped.BIoU": 0.006452454387805929,
-    "tasks.health.ungrouped.mIoU": 0.002377878645640261,
-    "tasks.health.ungrouped.BIoU": 0.007311933612988328,
-    "tasks.health.grouped.mIoU": 0.012590777524093892,
-    "tasks.health.grouped.BIoU": 0.008863759877303356,
-    "tasks.fish.ungrouped.mIoU": 0.4856635629505817,
-    "tasks.fish.ungrouped.BIoU": 0.007169676684918366,
-    "tasks.human_artifacts.ungrouped.mIoU": 0.023057223700151862,
-    "tasks.human_artifacts.ungrouped.BIoU": 0.004300870587571816,
-    "tasks.substrate.ungrouped.mIoU": 0.004929231950911624,
-    "tasks.substrate.ungrouped.BIoU": 0.007086821859683317,
-    "tasks.background.ungrouped.mIoU": 0.10842915926330365,
-    "tasks.background.ungrouped.BIoU": 0.005386546398327544,
-    "tasks.biota.ungrouped.mIoU": 0.0019417877114066295,
-    "tasks.biota.ungrouped.BIoU": 0.002212188248106385,
-    "global.mIoU": 2.3496946816521055e-06,
-    "global.BIoU": 0.0005682912135346472,
-    "global.classification_error": 0.9845404624936617,
-    "global.background_error": 0.01544237136840452,
-    "global.missed_error": 0.0,
-    "global.Boundary_F1": 0.0011359156803866326,
-    "global.Boundary_Precision": 0.05299739355545978,
-    "global.Boundary_Recall": 0.0005741212493864303,
-    "global.NLL": 12.598498344421387,
-    "global.Brier_Score": 1.01471745967865,
-    "global.ECE": 0.06146467477083206
+    "tasks.genus.ungrouped.mIoU": 0.021453741767039722,
+    "tasks.genus.ungrouped.BIoU": 0.01789349739070991,
+    "tasks.genus.grouped.mIoU": 0.03781560332605423,
+    "tasks.genus.grouped.BIoU": 0.01513474475816183,
+    "tasks.health.ungrouped.mIoU": 0.030477351671001178,
+    "tasks.health.ungrouped.BIoU": 0.005709010774569028,
+    "tasks.health.grouped.mIoU": 0.0995041830760073,
+    "tasks.health.grouped.BIoU": 0.012138747834459522,
+    "tasks.fish.ungrouped.mIoU": 0.31152157491763455,
+    "tasks.fish.ungrouped.BIoU": 0.002325657482176342,
+    "tasks.human_artifacts.ungrouped.mIoU": 0.007320119858729939,
+    "tasks.human_artifacts.ungrouped.BIoU": 0.0013026651079556394,
+    "tasks.substrate.ungrouped.mIoU": 0.05562158114519106,
+    "tasks.substrate.ungrouped.BIoU": 0.010212368560082279,
+    "tasks.background.ungrouped.mIoU": 0.006928484339260427,
+    "tasks.background.ungrouped.BIoU": 0.0,
+    "tasks.biota.ungrouped.mIoU": 0.02079869190165434,
+    "tasks.biota.ungrouped.BIoU": 0.0015391234043155924,
+    "global.mIoU": 0.012593813187581066,
+    "global.BIoU": 0.01419850485022518,
+    "global.classification_error": 0.7572138309476955,
+    "global.background_error": 0.015435218811031475,
+    "global.missed_error": 0.001520633697509403,
+    "global.Boundary_F1": 0.027999005755804208,
+    "global.Boundary_Precision": 0.02145587851969066,
+    "global.Boundary_Recall": 0.04028574296924126,
+    "global.NLL": 12.563312530517578,
+    "global.Brier_Score": 1.0106455087661743,
+    "global.ECE": 0.1642693728208542
   }
 }

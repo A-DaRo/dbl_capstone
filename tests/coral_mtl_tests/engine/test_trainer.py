@@ -14,6 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, call
 import optuna
+from coral_mtl.engine.pcgrad import PCGrad
 
 from coral_mtl.engine.trainer import Trainer
 from coral_mtl.engine.gradient_strategies import GradientUpdateStrategy
@@ -147,6 +148,114 @@ def test_trainer_smoke_run(mock_model, mock_loaders, mock_loss_fn, mock_optimize
     metrics_payload = stored_args[0]
     opt_metrics = metrics_payload.get('optimization_metrics', {})
     assert any(k.startswith('train_') for k in opt_metrics.keys()), "Train namespaced losses missing in optimization_metrics"
+
+
+def test_trainer_auto_enables_pcgrad_wrapper(tmp_path, mock_model, mock_loaders, mock_loss_fn,
+                                             mock_metrics_calculator, mock_metrics_storer):
+    """Trainer should detect a PCGrad-wrapped optimizer and configure itself accordingly."""
+
+    train_loader, val_loader = mock_loaders
+    params = mock_model.parameters.return_value
+    base_optimizer = torch.optim.SGD(params, lr=0.01)
+    wrapped_optimizer = PCGrad(base_optimizer)
+
+    scheduler = MagicMock()
+    scheduler.get_last_lr.return_value = [1e-4]
+
+    config = SimpleNamespace(
+        device='cpu',
+        output_dir=str(tmp_path),
+        epochs=1,
+        model_selection_metric='global.BIoU',
+        use_mixed_precision=True,
+        gradient_accumulation_steps=1,
+        patch_size=[32, 32],
+        inference_stride=[16, 16],
+        inference_batch_size=1,
+        pcgrad=SimpleNamespace(enabled=False),
+        log_frequency=50
+    )
+
+    trainer = Trainer(
+        model=mock_model,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        loss_fn=mock_loss_fn,
+        metrics_calculator=mock_metrics_calculator,
+        metrics_storer=mock_metrics_storer,
+        optimizer=wrapped_optimizer,
+        scheduler=scheduler,
+        config=config
+    )
+
+    assert trainer.pcgrad_enabled is True
+    assert trainer.pcgrad is wrapped_optimizer
+    assert trainer.optimizer is base_optimizer
+    assert trainer.use_mixed_precision is False
+    assert getattr(trainer.config.pcgrad, 'enabled', False) is True
+
+
+def test_pcgrad_skips_nondifferentiable_components(tmp_path, mock_model, mock_loaders, mock_loss_fn,
+                                                   mock_metrics_calculator, mock_metrics_storer):
+    """Ensure PCGrad falls back to differentiable losses when components lack gradients."""
+
+    train_loader, val_loader = mock_loaders
+    params = mock_model.parameters.return_value
+    base_optimizer = torch.optim.SGD(params, lr=0.01)
+    wrapped_optimizer = PCGrad(base_optimizer)
+
+    scheduler = MagicMock()
+    scheduler.get_last_lr.return_value = [1e-4]
+
+    mock_loss_fn.weighting_strategy = SimpleNamespace(tasks=['task_a'])
+    mock_loss_fn.w_consistency = 1.0
+
+    config = SimpleNamespace(
+        device='cpu',
+        output_dir=str(tmp_path),
+        epochs=1,
+        model_selection_metric='global.BIoU',
+        use_mixed_precision=True,
+        gradient_accumulation_steps=1,
+        patch_size=[32, 32],
+        inference_stride=[16, 16],
+        inference_batch_size=1,
+        pcgrad=SimpleNamespace(enabled=True),
+        log_frequency=50
+    )
+
+    trainer = Trainer(
+        model=mock_model,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        loss_fn=mock_loss_fn,
+        metrics_calculator=mock_metrics_calculator,
+        metrics_storer=mock_metrics_storer,
+        optimizer=wrapped_optimizer,
+        scheduler=scheduler,
+        config=config
+    )
+
+    trainer.pcgrad.step = MagicMock()
+
+    param = params[0]
+    differentiable = (param * param).sum()
+    nondiff = torch.zeros((), device=param.device)
+
+    loss_payload = {
+        'weighted_task_a_loss': nondiff,
+        'total_loss': differentiable,
+        'consistency_loss': torch.zeros((), device=param.device)
+    }
+
+    with pytest.warns(RuntimeWarning):
+        trainer._apply_pcgrad(loss_payload)
+
+    trainer.pcgrad.step.assert_called_once()
+    grads, params_passed = trainer.pcgrad.step.call_args[0]
+    assert len(grads) == 1
+    assert grads[0][0] is not None
+    assert params_passed == [param]
 
 
 def test_trainer_manages_model_modes(mock_model, mock_loaders, mock_loss_fn, mock_optimizer, mock_scheduler,

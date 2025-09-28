@@ -74,9 +74,7 @@ loss:
     focal_gamma: 2.0
     ignore_index: 0
   weighting_strategy:
-    type: "IMGrad"
-    params:
-      solver: "qp"           # or "pgd" / "auto"
+    type: "DWA"           # or "pgd" / "auto"
 # --------------------------------------------------------------------------
 # Configuration for Metrics
 # --------------------------------------------------------------------------
@@ -122,7 +120,7 @@ trainer:
   output_dir: "tests/mock_dir/coral_mtl_test"
   
   # Number of steps to accumulate gradients before performing an optimizer step.
-  gradient_accumulation_steps: 4
+  gradient_accumulation_steps: 1  # PCGrad requires single-step updates
   
   # Enable mixed precision training (FP16) for faster training on compatible hardware
   use_mixed_precision: true

@@ -1,96 +1,96 @@
 {
   "tasks.genus.ungrouped.mIoU": [
-    0.003920633008491517
+    0.042041814626424874
   ],
   "tasks.genus.ungrouped.BIoU": [
-    0.002514978918555912
+    0.008242871271766771
   ],
   "tasks.genus.grouped.mIoU": [
-    0.015898888830201772
+    0.07851510466346819
   ],
   "tasks.genus.grouped.BIoU": [
-    0.00967460995018113
+    0.014461125579799653
   ],
   "tasks.health.ungrouped.mIoU": [
-    0.003920633008491517
+    0.042041814626424874
   ],
   "tasks.health.ungrouped.BIoU": [
-    0.002514978918555912
+    0.008242871271766771
   ],
   "tasks.health.grouped.mIoU": [
-    0.06502154193524065
+    0.17864597180248606
   ],
   "tasks.health.grouped.BIoU": [
-    0.01815485552507784
+    0.026047203912336142
   ],
   "tasks.fish.ungrouped.mIoU": [
-    0.49160496652205066
+    0.4916741130327021
   ],
   "tasks.fish.ungrouped.BIoU": [
-    0.0
+    0.00905603038929492
   ],
   "tasks.human_artifacts.ungrouped.mIoU": [
-    0.3295297622680664
+    0.24997437000274658
   ],
   "tasks.human_artifacts.ungrouped.BIoU": [
     0.0
   ],
   "tasks.substrate.ungrouped.mIoU": [
-    0.1373370221957252
+    0.1121071413709225
   ],
   "tasks.substrate.ungrouped.BIoU": [
-    0.0033890500529226964
+    0.0063652753203474926
   ],
   "tasks.background.ungrouped.mIoU": [
-    0.2845182418823242
+    0.26438167425631126
   ],
   "tasks.background.ungrouped.BIoU": [
-    0.0
+    0.01995202235933456
   ],
   "tasks.biota.ungrouped.mIoU": [
-    0.14036893844604492
+    0.05098435003118354
   ],
   "tasks.biota.ungrouped.BIoU": [
-    0.0
+    0.0010420370812135298
   ],
   "global.mIoU": [
-    0.0008269352250023274
+    0.003967361189940601
   ],
   "global.BIoU": [
-    0.002412510911683199
+    0.008203179336194475
   ],
   "global.classification_error": [
-    0.8588962554927546
+    0.8464097976680536
   ],
   "global.background_error": [
     0.13519430160516016
   ],
   "global.missed_error": [
-    0.0
+    0.00012063980102533311
   ],
   "global.Boundary_F1": [
-    0.004812970628727853
+    0.01627258610935018
   ],
   "global.Boundary_Precision": [
-    0.0035661066647385566
+    0.00981281512280486
   ],
   "global.Boundary_Recall": [
-    0.007402579989312712
+    0.047627214303606724
   ],
   "global.NLL": [
-    3.697652816772461
+    3.687894821166992
   ],
   "global.Brier_Score": [
-    0.9754900336265564
+    0.9749332070350647
   ],
   "global.ECE": [
-    0.024053778499364853
+    0.011052927002310753
   ],
   "train_total_loss": [
-    3.828951835632324
+    4.257450103759766
   ],
   "val_total_loss": [
-    3.619263172149658
+    3.6157751083374023
   ],
   "epoch": [
     1
