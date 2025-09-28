@@ -14,17 +14,17 @@ project_root = Path(__file__).parent.parent
 
 # Path to the root of the original 'coralscapes' directory
 # This directory should contain 'leftImg8bit' and 'gtFine' subdirectories
-DATASET_ROOT = project_root / "tests/dataset/coralscapes"  # TODO: Update this path!
+DATASET_ROOT = project_root / "./dataset/coralscapes"  # TODO: Update this path!
 
 # =============================================================================
 # OUTPUT CONFIGURATION
 # =============================================================================
 
 # Directory where the PDS-generated patch dataset will be saved
-PDS_OUTPUT_DIR = project_root / "tests/dataset/processed/pds_patches"
+PDS_OUTPUT_DIR = project_root / "./dataset/processed/pds_patches"
 
 # Root directory for all analysis reports and plots
-ANALYSIS_OUTPUT_DIR = project_root / "tests/experiments/pds/data_analysis/no_task_def"
+ANALYSIS_OUTPUT_DIR = project_root / "./experiments/pds/data_analysis/no_task_def"
 
 # =============================================================================
 # PATCH GENERATION PARAMETERS
@@ -40,7 +40,7 @@ PDS_RADIUS = 300
 
 # Number of CPU cores to use for parallel processing
 # Set to None to use all available cores
-NUM_WORKERS = 16  # Will use os.cpu_count() if None
+NUM_WORKERS = 32  # Will use os.cpu_count() if None
 
 # =============================================================================
 # TASK DEFINITION (OPTIONAL)
