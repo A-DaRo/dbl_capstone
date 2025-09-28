@@ -48,7 +48,7 @@ data:
   # Parameters for the final DataLoader object.
   # Use batch_size_per_gpu (factory fallback to batch_size if missing)
   batch_size_per_gpu: 8
-  num_workers: 24
+  num_workers: 16
   persistent_workers: true
   prefetch_factor: 3
   drop_last: true
@@ -144,8 +144,8 @@ trainer:
   inference_stride: 341
   
   # The number of patches to process in a single batch during validation inference.
-  # Increased from 16 to 24 for better GPU utilization
-  inference_batch_size: 24
+  # Lowered to reduce GPU memory pressure during validation
+  inference_batch_size: 8
 
 # --------------------------------------------------------------------------
 # Configuration for the Evaluator Engine
@@ -163,7 +163,7 @@ evaluator:
   # Evaluator-specific inference settings (optimized for thorough testing)
   # Use slightly more conservative settings for final evaluation to ensure accuracy
   inference_stride: 320  # ~37% overlap for more thorough coverage
-  inference_batch_size: 16  # Slightly smaller batch for stability during testing
+  inference_batch_size: 8  # Lower batch size to prevent validation/test OOM
 
 metrics_processor:
   # Master switch to enable/disable the advanced metrics processing

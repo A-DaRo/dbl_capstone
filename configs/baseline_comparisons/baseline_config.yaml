@@ -34,7 +34,7 @@ data:
   # Parameters for the final DataLoader object.
   # Use batch_size_per_gpu (factory fallback to batch_size if missing)
   batch_size_per_gpu: 8
-  num_workers: 24
+  num_workers: 16
   persistent_workers: true
   prefetch_factor: 3
   drop_last: true
