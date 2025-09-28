@@ -129,7 +129,7 @@ trainer:
   output_dir: "experiments/baseline_comparisons/coral_mtl_b2_run"
   
   # Number of steps to accumulate gradients before performing an optimizer step.
-  gradient_accumulation_steps: 1
+  gradient_accumulation_steps: 4
   
   # Enable mixed precision training for faster training on compatible hardware
   use_mixed_precision: true
@@ -163,7 +163,7 @@ evaluator:
   # Evaluator-specific inference settings (optimized for thorough testing)
   # Use slightly more conservative settings for final evaluation to ensure accuracy
   inference_stride: 320  # ~37% overlap for more thorough coverage
-  inference_batch_size: 20  # Slightly smaller batch for stability during testing
+  inference_batch_size: 16  # Slightly smaller batch for stability during testing
 
 metrics_processor:
   # Master switch to enable/disable the advanced metrics processing

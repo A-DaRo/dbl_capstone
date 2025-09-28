@@ -66,8 +66,11 @@ class BaselineComparison:
             script_dir = os.path.dirname(os.path.abspath(__file__))
             project_root = os.path.dirname(os.path.dirname(script_dir))
             base_config_dir = os.path.join(project_root, "configs", "baseline_comparisons")
+        else:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
         
         self.base_config_dir = base_config_dir
+        self.script_dir = script_dir
         self.results = {}
         self.config_paths = {
             'baseline': os.path.join(base_config_dir, 'baseline_config.yaml'),
@@ -85,10 +88,12 @@ class BaselineComparison:
         # Create a more detailed log format
         log_format = '%(asctime)s - %(name)s - %(levelname)s - [%(funcName)s:%(lineno)d] - %(message)s'
         
-        # Create timestamp for log filename
+        # Create timestamp for log filename and ensure it lives next to this script as .md
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_filename = f'baseline_comparison_{timestamp}.log'
-        self.log_filename = log_filename
+        script_dir_path = Path(self.script_dir)
+        script_dir_path.mkdir(parents=True, exist_ok=True)
+        log_path = script_dir_path / f'baseline_comparison_{timestamp}.md'
+        self.log_filename = str(log_path)
         
         # Remove any existing handlers to avoid duplicates
         for handler in logging.root.handlers[:]:
@@ -100,7 +105,7 @@ class BaselineComparison:
             format=log_format,
             handlers=[
                 logging.StreamHandler(sys.stdout),
-                logging.FileHandler(log_filename, mode='w', encoding='utf-8')
+                logging.FileHandler(self.log_filename, mode='w', encoding='utf-8')
             ],
             force=True  # Force reconfiguration
         )
@@ -114,7 +119,7 @@ class BaselineComparison:
         logging.getLogger('PIL').setLevel(logging.WARNING)
         
         # Log initial setup information
-        self.logger.info(f"Logging configured with file: {log_filename}")
+        self.logger.info(f"Logging configured with file: {self.log_filename}")
         self.logger.info(f"Log level set to: {logging.getLevelName(logging.DEBUG)}")
         self.logger.info(f"Python version: {sys.version}")
         self.logger.info(f"PyTorch version: {torch.__version__ if 'torch' in sys.modules else 'Not loaded'}")
