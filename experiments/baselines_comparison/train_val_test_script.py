@@ -31,6 +31,8 @@ import argparse
 import logging
 import torch
 import platform
+import atexit
+import signal
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 import json
@@ -86,6 +88,7 @@ class BaselineComparison:
         # Create timestamp for log filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_filename = f'baseline_comparison_{timestamp}.log'
+        self.log_filename = log_filename
         
         # Remove any existing handlers to avoid duplicates
         for handler in logging.root.handlers[:]:
@@ -118,6 +121,12 @@ class BaselineComparison:
         self.logger.info(f"Current working directory: {os.getcwd()}")
         self.logger.info(f"Script directory: {os.path.dirname(os.path.abspath(__file__))}")
         
+        # Ensure logs are flushed on normal interpreter shutdown
+        atexit.register(logging.shutdown)
+
+        # Install SIGINT handler to log and flush on Ctrl-C
+        self._install_interrupt_handler()
+
         # Log system information
         import platform
         self.logger.info(f"Platform: {platform.platform()}")
@@ -128,6 +137,30 @@ class BaselineComparison:
                 self.logger.info(f"  GPU {i}: {torch.cuda.get_device_name(i)}")
         else:
             self.logger.info("CUDA available: False")
+
+    def _install_interrupt_handler(self):
+        """Install a SIGINT handler that logs and forces a clean flush on Ctrl-C."""
+        logger = logging.getLogger(__name__)
+
+        def _sigint_handler(signum, frame):
+            try:
+                logger.error("Received KeyboardInterrupt (Ctrl-C). Flushing logs and exiting...", exc_info=True)
+                # Flush all handlers explicitly
+                root = logging.getLogger()
+                for h in list(root.handlers):
+                    try:
+                        h.flush()
+                    except Exception:
+                        pass
+            finally:
+                # Re-raise as KeyboardInterrupt to trigger normal abort flow
+                raise KeyboardInterrupt()
+
+        try:
+            signal.signal(signal.SIGINT, _sigint_handler)
+        except Exception:
+            # Some environments may not allow installing signal handlers
+            logger.debug("Skipping SIGINT handler installation (unsupported environment)")
     
     @staticmethod
     def _format_metric_value(value: Any) -> str:
@@ -618,11 +651,15 @@ def main():
                 print(f"\n🎉 All experiments completed successfully!")
         
     except KeyboardInterrupt:
-        print("\n⚠️  Experiment interrupted by user")
-        sys.exit(1)
+        logger = logging.getLogger(__name__)
+        logger.error("Experiment interrupted by user (Ctrl-C)", exc_info=True)
+        # Ensure all logs are flushed before exiting
+        logging.shutdown()
+        sys.exit(130)
     except Exception as e:
-        print(f"\n❌ Unexpected error: {str(e)}")
-        logging.error(f"Unexpected error: {str(e)}", exc_info=True)
+        logger = logging.getLogger(__name__)
+        logger.error(f"Unexpected error: {str(e)}", exc_info=True)
+        logging.shutdown()
         sys.exit(1)
 
 
