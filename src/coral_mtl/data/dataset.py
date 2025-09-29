@@ -177,7 +177,10 @@ class CoralscapesMTLDataset(AbstractCoralscapesDataset):
         
         task_masks_np = {}
         for task, details in self.splitter.hierarchical_definitions.items():
-            mapping_array = details['ungrouped']['mapping_array']
+            if details['is_grouped']:
+                mapping_array = details['grouped']['mapping_array']
+            else:
+                mapping_array = details['ungrouped']['mapping_array']
             clipped_mask = np.clip(raw_label_mask, 0, len(mapping_array) - 1)
             task_masks_np[task] = mapping_array[clipped_mask].astype(np.uint8)
         

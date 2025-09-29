@@ -299,6 +299,7 @@ class GradNormWeightingStrategy(WeightingStrategy):
             scale = len(self.tasks) / (weights_tensor.sum() + self.eps)
             for idx, task in enumerate(self.tasks):
                 self.weights[task].mul_(scale)
+                
 def build_weighting_strategy(config: Dict, primary: List[str], auxiliary: List[str]) -> WeightingStrategy:
     """Factory helper for ExperimentFactory.
 

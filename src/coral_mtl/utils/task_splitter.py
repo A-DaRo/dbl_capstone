@@ -93,7 +93,8 @@ class TaskSplitter(ABC):
 
                 task_data['grouped'] = {
                     'id2label': grouped_id2label,
-                    'class_names': list(grouped_id2label.values())
+                    'class_names': list(grouped_id2label.values()),
+                    'mapping_array': self._create_grouped_mapping_array(raw_group_map)
                 }
                 task_data['ungrouped_to_grouped_map'] = ungrouped_to_grouped_map
 
@@ -106,6 +107,18 @@ class TaskSplitter(ABC):
         for original_id, new_id in mapping_dict.items():
             if original_id <= self.max_original_id:
                 array[original_id] = new_id
+        return array
+
+    def _create_grouped_mapping_array(self, raw_group_map: Dict[str, Any]) -> np.ndarray:
+        """Helper to create a LUT array from original IDs to grouped IDs based on groupby.mapping."""
+        array = np.zeros(self.max_original_id + 1, dtype=np.int64)
+        for new_id_str, old_ids in raw_group_map.items():
+            new_id = int(new_id_str)
+            if isinstance(old_ids, int):
+                old_ids = [old_ids]
+            for old_id in old_ids:
+                if old_id <= self.max_original_id:
+                    array[old_id] = new_id
         return array
 
     def _find_max_original_id(self) -> int:

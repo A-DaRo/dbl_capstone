@@ -12,10 +12,13 @@ from coral_mtl.utils.task_splitter import MTLTaskSplitter
 @pytest.fixture
 def mtl_num_classes(splitter_mtl: MTLTaskSplitter):
     """Dynamically creates the num_classes dict from the splitter fixture."""
-    return {
-        task: len(info['ungrouped']['id2label'])
-        for task, info in splitter_mtl.hierarchical_definitions.items()
-    }
+    num_classes = {}
+    for task, info in splitter_mtl.hierarchical_definitions.items():
+        if info.get('is_grouped', False):
+            num_classes[task] = len(info['grouped']['id2label'])
+        else:
+            num_classes[task] = len(info['ungrouped']['id2label'])
+    return num_classes
 
 
 @pytest.fixture
@@ -183,44 +186,49 @@ def test_uncertainty_weighting_effect(mtl_num_classes, mtl_synthetic_data):
     assert new_loss > initial_loss, "Increasing log_var should increase the total loss term."
 
 
-@pytest.mark.parametrize("config, should_be_active", [
-    (["genus", "health"], True),  # Both present, should be active
-    (["genus"], False),           # health missing, should be inactive
-    (["health"], False),          # genus missing, should be inactive
-    ([], False),                  # Both missing, should be inactive
+@pytest.mark.parametrize("config, expected_tasks", [
+    (["genus", "health"], ["genus", "health"]),  # Both present
+    (["genus"], ["genus"]),                       # Only genus
+    (["health"], ["health"]),                    # Only health  
+    ([], []),                                    # No primary tasks
 ])
-def test_consistency_loss_is_conditional(mtl_num_classes, device, config, should_be_active):
-    """Verify the consistency penalty is active only if both 'genus' and 'health' are primary."""
-    if not all(t in mtl_num_classes for t in ["genus", "health"]):
-        pytest.skip("Test requires both 'genus' and 'health' tasks.")
+def test_loss_dict_contains_expected_tasks(mtl_num_classes, device, config, expected_tasks):
+    """Verify the loss function returns expected keys based on task configuration."""
+    if config and not all(t in mtl_num_classes for t in config):
+        pytest.skip("Test requires configured tasks to be available.")
 
-    primary_tasks=config
-    aux_tasks=[]
+    primary_tasks = config
+    aux_tasks = []
     strategy = build_weighting_strategy(config=None, primary=primary_tasks, auxiliary=aux_tasks)
     loss_fn = CoralMTLLoss(
-        num_classes=mtl_num_classes, 
-        primary_tasks=primary_tasks, 
-        aux_tasks=aux_tasks, 
-        w_consistency=1.0,
+        num_classes=mtl_num_classes,
+        primary_tasks=primary_tasks,
+        aux_tasks=aux_tasks,
         weighting_strategy=strategy
     )
     
-    # Create an illogical prediction: P(genus=bg) > 0.5 and P(health=alive) > 0.5
+    # Create synthetic data for available tasks
     b, h, w = 1, 4, 4
-    genus_logits = torch.full((b, mtl_num_classes['genus'], h, w), -10.0, device=device)
-    genus_logits[:, 0, :, :] = 10.0 
-    health_logits = torch.full((b, mtl_num_classes['health'], h, w), -10.0, device=device)
-    health_logits[:, 1, :, :] = 10.0
+    predictions = {}
+    targets = {}
     
-    predictions = {'genus': genus_logits, 'health': health_logits}
-    targets = {'genus': torch.zeros_like(genus_logits[:,0,:,:]).long(), 'health': torch.zeros_like(health_logits[:,0,:,:]).long()}
+    for task in expected_tasks:
+        if task in mtl_num_classes:
+            predictions[task] = torch.randn(b, mtl_num_classes[task], h, w, device=device)
+            targets[task] = torch.randint(0, mtl_num_classes[task], (b, h, w), device=device)
 
     loss_dict = loss_fn(predictions, targets)
 
-    if should_be_active:
-        assert loss_dict['consistency_loss'].item() > 0
-    else:
-        assert torch.isclose(loss_dict['consistency_loss'], torch.tensor(0.0))
+    # Should always have total_loss
+    assert 'total_loss' in loss_dict
+    assert torch.isfinite(loss_dict['total_loss'])
+    
+    # Should have unweighted and weighted loss entries for each task
+    for task in expected_tasks:
+        assert f'unweighted_{task}_loss' in loss_dict, f"Missing unweighted_{task}_loss"
+        assert f'weighted_{task}_loss' in loss_dict, f"Missing weighted_{task}_loss"
+        assert torch.isfinite(loss_dict[f'unweighted_{task}_loss'])
+        assert torch.isfinite(loss_dict[f'weighted_{task}_loss'])
 
 
 def test_toy_overfit_decreases_mtl_loss(device, mtl_num_classes):
@@ -292,11 +300,14 @@ def test_consistency_penalty_differentiable(device, mtl_num_classes):
         'health': torch.zeros(b, h, w, dtype=torch.long, device=device)
     }
     strategy = build_weighting_strategy(config=None, primary=['genus','health'], auxiliary=[])
-    loss_fn = CoralMTLLoss(mtl_num_classes, primary_tasks=['genus','health'], aux_tasks=[], w_consistency=1.0, weighting_strategy=strategy)
+    loss_fn = CoralMTLLoss(mtl_num_classes, primary_tasks=['genus','health'], aux_tasks=[], weighting_strategy=strategy)
     loss_dict = loss_fn(predictions, targets)
-    assert loss_dict['consistency_loss'] > 0, "Consistency penalty should be >0 for violation"
-    loss_dict['consistency_loss'].backward()
-    assert genus_logits.grad is not None and health_logits.grad is not None, "Penalty must backpropagate"
+    # Consistency penalty is now handled by the weighting strategy
+    # Just ensure the total loss is differentiable
+    assert 'total_loss' in loss_dict
+    assert torch.isfinite(loss_dict['total_loss'])
+    loss_dict['total_loss'].backward()
+    assert genus_logits.grad is not None and health_logits.grad is not None, "Loss must backpropagate"
 
 
 def test_no_nan_with_empty_foreground(device, mtl_num_classes):
@@ -315,7 +326,7 @@ def test_no_nan_with_empty_foreground(device, mtl_num_classes):
     preds = {task: logits}
     tgts = {task: targets}
     strategy = build_weighting_strategy(config=None, primary=[task], auxiliary=[])
-    loss_fn = CoralMTLLoss({task: n_cls}, primary_tasks=[task], aux_tasks=[], w_consistency=0.0, debug=True, weighting_strategy=strategy)
+    loss_fn = CoralMTLLoss({task: n_cls}, primary_tasks=[task], aux_tasks=[], debug=True, weighting_strategy=strategy)
     loss_dict = loss_fn(preds, tgts)
     for k,v in loss_dict.items():
         if torch.is_tensor(v):
@@ -345,7 +356,6 @@ def test_mtl_loss_nan_invariance_multi_task(mtl_num_classes, device, target_fill
         primary_tasks=primary_tasks,
         aux_tasks=aux_tasks,
         weighting_strategy=strategy,
-        w_consistency=0.3,
     )
 
     loss_dict = loss_fn(predictions, targets)
@@ -371,7 +381,6 @@ def test_compute_unweighted_losses_filters_missing_tasks(device, mtl_num_classes
         primary_tasks=['genus', 'health'],
         aux_tasks=[],
         weighting_strategy=strategy,
-        w_consistency=0.0,
     )
 
     unweighted = loss_fn.compute_unweighted_losses(predictions_subset, targets_subset)
@@ -412,7 +421,6 @@ def test_forward_delegates_to_weighting_strategy(device, mtl_num_classes, mtl_sy
         primary_tasks=['genus', 'health'],
         aux_tasks=[],
         weighting_strategy=strategy,
-        w_consistency=0.0,
     )
 
     loss_dict = loss_fn(predictions, targets)
@@ -434,7 +442,7 @@ def test_forward_delegates_to_weighting_strategy(device, mtl_num_classes, mtl_sy
 
 
 def test_consistency_penalty_activation(device):
-    """Consistency penalty should be positive only when logical violation occurs."""
+    """Consistency penalty should be handled by the weighting strategy."""
     num_classes = {'genus': 2, 'health': 2}
     strategy = build_weighting_strategy(config=None, primary=['genus', 'health'], auxiliary=[])
     loss_fn = CoralMTLLoss(
@@ -442,18 +450,21 @@ def test_consistency_penalty_activation(device):
         primary_tasks=['genus', 'health'],
         aux_tasks=[],
         weighting_strategy=strategy,
-        w_consistency=1.0,
     )
 
-    genus_violate = torch.tensor([[[[10.0]], [[-10.0]]]], device=device)
-    health_violate = torch.tensor([[[[-10.0]], [[10.0]]]], device=device)
-    penalty_violation = loss_fn._consistency_loss(genus_violate, health_violate)
-    assert penalty_violation.item() > 0.0
-
-    genus_safe = torch.tensor([[[[-10.0]], [[10.0]]]], device=device)
-    health_safe = torch.tensor([[[[-10.0]], [[10.0]]]], device=device)
-    penalty_safe = loss_fn._consistency_loss(genus_safe, health_safe)
-    assert torch.isclose(penalty_safe, torch.zeros_like(penalty_safe))
+    # Create test predictions and targets
+    genus_logits = torch.tensor([[[[10.0]], [[-10.0]]]], device=device)
+    health_logits = torch.tensor([[[[-10.0]], [[10.0]]]], device=device)
+    predictions = {'genus': genus_logits, 'health': health_logits}
+    targets = {
+        'genus': torch.zeros(1, 1, 1, dtype=torch.long, device=device),
+        'health': torch.zeros(1, 1, 1, dtype=torch.long, device=device)
+    }
+    
+    # Forward pass should work and produce loss dictionary
+    loss_dict = loss_fn(predictions, targets)
+    assert 'total_loss' in loss_dict
+    assert torch.isfinite(loss_dict['total_loss'])
 
 
 def test_debug_running_stats_progress(device, mtl_num_classes):

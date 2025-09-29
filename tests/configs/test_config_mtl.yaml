@@ -22,8 +22,8 @@ model:
   # The factory will look up these names in the task_definitions.yaml file
   # to determine the number of classes for each corresponding decoder head.
   tasks:
-    primary: ["genus", "health"]
-    auxiliary: ["fish", "human_artifacts", "substrate", "background", "biota"]
+    primary: ["genus", "health", "fish", "human_artifacts", "substrate", "background", "biota"]
+    auxiliary: []
 
 # --------------------------------------------------------------------------
 # Configuration for Datasets and DataLoaders
@@ -74,7 +74,7 @@ loss:
     focal_gamma: 2.0
     ignore_index: 0
   weighting_strategy:
-    type: "DWA"           
+    type: "NashMTL"           
 # --------------------------------------------------------------------------
 # Configuration for Metrics
 # --------------------------------------------------------------------------
@@ -131,7 +131,7 @@ trainer:
   # - global.NLL, global.Brier_Score, global.ECE
   # - global.classification_error, global.background_error, global.missed_error
   # - tasks.{task}.{level}.mIoU, tasks.{task}.{level}.BIoU
-  model_selection_metric: "global.BIoU"
+  model_selection_metric: "global.mIoU"
   
   # --- Parameters for the SlidingWindowInferrer used during validation ---
   # The step size for the sliding window. Optimized for 33% overlap (balance of speed/accuracy)

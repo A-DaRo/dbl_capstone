@@ -132,6 +132,10 @@ class Trainer:
             autocast_dtype = torch.bfloat16 if self.mixed_precision_dtype == 'bf16' else torch.float16
             with torch.amp.autocast(device_type=self.device.type, dtype=autocast_dtype, enabled=self.use_mixed_precision):
                 predictions = self.model(images)
+                
+                # Shape assertions before loss computation
+                self._validate_predictions_targets_shape(predictions, masks_for_loss)
+                
                 # Branch depending on strategy type
                 if isinstance(getattr(self.loss_fn, 'weighting_strategy', None), GradientUpdateStrategy):
                     # Gradient-based strategy path
@@ -329,6 +333,63 @@ class Trainer:
         if callable(store_fn):
             store_fn(step=self.global_step, epoch=epoch_index, diagnostics=diagnostics)
 
+    def _validate_predictions_targets_shape(self, predictions, targets):
+        """
+        Lightweight shape assertions to ensure predictions and targets match expected task configurations.
+        
+        Args:
+            predictions: Model predictions (dict for MTL, tensor for baseline)
+            targets: Ground truth targets (dict for MTL, tensor for baseline)
+        """
+        # Get task splitter if available (will be passed via config or accessible through loss_fn)
+        task_splitter = getattr(self.loss_fn, 'task_splitter', None) or getattr(self.config, 'task_splitter', None)
+        
+        # Skip validation if no task splitter available or if using baseline model
+        if task_splitter is None or not hasattr(task_splitter, 'hierarchical_definitions'):
+            return
+            
+        # Handle MTL case where predictions and targets are dictionaries
+        if isinstance(predictions, dict) and isinstance(targets, dict):
+            hierarchical_definitions = task_splitter.hierarchical_definitions
+            
+            for task_name in predictions.keys():
+                if task_name not in targets:
+                    continue
+                    
+                pred_tensor = predictions[task_name]
+                target_tensor = targets[task_name]
+                
+                # Get task details from splitter
+                task_details = hierarchical_definitions.get(task_name)
+                if task_details is None:
+                    continue
+                
+                # Determine expected class count
+                if task_details['is_grouped']:
+                    expected_classes = len(task_details['grouped']['id2label'])
+                else:
+                    expected_classes = len(task_details['ungrouped']['id2label'])
+                
+                # Shape assertion: predictions[task].shape[1] must equal expected class count
+                actual_classes = pred_tensor.shape[1]
+                assert actual_classes == expected_classes, (
+                    f"Task '{task_name}' prediction shape mismatch: "
+                    f"got {actual_classes} classes, expected {expected_classes} classes"
+                )
+                
+                # Target validation: dtype should be long and values in [0, C_task-1]
+                assert target_tensor.dtype == torch.long, (
+                    f"Task '{task_name}' target dtype should be torch.long, got {target_tensor.dtype}"
+                )
+                
+                # Spot-check target values are in valid range (skip if empty/masked)
+                if target_tensor.numel() > 0:
+                    max_target_value = target_tensor.max().item()
+                    assert max_target_value < expected_classes, (
+                        f"Task '{task_name}' target values out of range: "
+                        f"max value {max_target_value} >= {expected_classes} classes"
+                    )
+
     def _validate_one_epoch(self, epoch: int = None) -> Dict[str, Any]:
         """
         Executes a single validation epoch using sliding window inference.
@@ -379,6 +440,9 @@ class Trainer:
                     masks_for_loss = masks_for_loss.to(self.device, non_blocking=True)
 
                 if masks_for_loss is not None:
+                    # Shape assertions before loss computation
+                    self._validate_predictions_targets_shape(predictions_for_metrics, masks_for_loss)
+                    
                     loss_dict_or_tensor = self.loss_fn(predictions_for_metrics, masks_for_loss)
                     if isinstance(loss_dict_or_tensor, dict):
                         for key, val in loss_dict_or_tensor.items():

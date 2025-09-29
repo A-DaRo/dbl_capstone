@@ -19,7 +19,7 @@ class BaselineSegformer(nn.Module):
         self,
     encoder_name: str,
     decoder_channel: int,
-    num_classes: int = 39,
+    num_classes: int,
     encoder_weights: Optional[str] = "imagenet",
     encoder_depth: int = 5,
     ):
@@ -27,8 +27,7 @@ class BaselineSegformer(nn.Module):
         Args:
             encoder_name (str): The Hugging Face ID for the SegFormer backbone (e.g., 'nvidia/mit-b2').
             decoder_channel (int): The unified channel dimension for the MLP decoder.
-            num_classes (int): The total number of output classes. For this project,
-                               this is fixed at 39 to match the original dataset.
+            num_classes (int): The total number of output classes, derived from the task splitter.
         """
         super().__init__()
         
@@ -96,7 +95,7 @@ class CoralMTLModel(nn.Module):
     decoder_channel: int,
     num_classes: Dict[str, int],
     attention_dim: int,
-    primary_tasks: Optional[List[str]] = None,
+    primary_tasks: List[str],
     aux_tasks: Optional[List[str]] = None,
     encoder_weights: Optional[str] = "imagenet",
     encoder_depth: int = 5,
@@ -107,21 +106,24 @@ class CoralMTLModel(nn.Module):
             decoder_channel (int): The unified channel dimension for all decoder streams.
             num_classes (Dict[str, int]): A dictionary mapping task names to their number of classes.
             attention_dim (int): The dimension for the query, key, and value in the attention module.
-            primary_tasks (List[str]): List of primary task names.
-            aux_tasks (List[str]): List of auxiliary task names.
+            primary_tasks (List[str]): List of primary task names. Must contain at least one task.
+            aux_tasks (Optional[List[str]]): List of auxiliary task names. Can be None (treated as empty list).
         """
         super().__init__()
+        
+        # Validation: Require at least one primary task
+        if not primary_tasks:
+            raise ValueError("At least one primary task must be specified.")
+        
+        # Handle optional aux_tasks
+        if aux_tasks is None:
+            aux_tasks = []
         
         self.encoder = SegFormerEncoder(
             name=encoder_name,
             weights=encoder_weights,
             depth=encoder_depth,
         )
-
-        if primary_tasks is None:
-            primary_tasks = ['genus', 'health']
-        if aux_tasks is None:
-            aux_tasks = ['fish', 'human_artifacts', 'substrate']
         
         self.decoder = HierarchicalContextAwareDecoder(
             encoder_channels=self.encoder.decoder_channels,

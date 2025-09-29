@@ -63,7 +63,8 @@ def test_get_model_aligns_with_task_definitions(factory_section_config, experime
         outputs = model(dummy_images)
         assert set(outputs.keys()) == set(expected_tasks)
         for task, logits in outputs.items():
-            expected_classes = len(factory.task_splitter.hierarchical_definitions[task]['ungrouped']['id2label'])
+            task_info = factory.task_splitter.hierarchical_definitions[task]
+            expected_classes = len(task_info['grouped']['id2label']) if task_info['is_grouped'] else len(task_info['ungrouped']['id2label'])
             assert logits.shape[1] == expected_classes
     else:
         assert isinstance(model, BaselineSegformer)

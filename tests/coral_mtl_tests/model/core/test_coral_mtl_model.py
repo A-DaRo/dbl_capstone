@@ -38,9 +38,12 @@ class TestCoralMTLModel:
         """
         # Setup: Dynamically create the model based on the current splitter variant
         defined_tasks = splitter_mtl.hierarchical_definitions
-        num_classes = {
-            task: len(info["ungrouped"]["id2label"]) for task, info in defined_tasks.items()
-        }
+        num_classes = {}
+        for task, info in defined_tasks.items():
+            if info.get('is_grouped', False):
+                num_classes[task] = len(info['grouped']['id2label'])
+            else:
+                num_classes[task] = len(info['ungrouped']['id2label'])
         # For this test, assume all defined tasks are primary to maximize complexity
         model = CoralMTLModel(
             encoder_name="mit_b0",
@@ -62,8 +65,12 @@ class TestCoralMTLModel:
         assert set(outputs.keys()) == set(defined_tasks.keys()), "Output tasks do not match splitter tasks."
 
         for task_name, output_tensor in outputs.items():
-            expected_classes = len(defined_tasks[task_name]["ungrouped"]["id2label"])
-            expected_shape = (dummy_images.size(0), expected_classes, h, w)
+            details = defined_tasks[task_name]
+            if details.get('is_grouped', False):
+                expected_C = len(details['grouped']['id2label'])
+            else:
+                expected_C = len(details['ungrouped']['id2label'])
+            expected_shape = (dummy_images.size(0), expected_C, h, w)
             assert output_tensor.shape == expected_shape, f"Shape mismatch for task '{task_name}'."
             assert output_tensor.device.type == device.type, f"Tensor for task '{task_name}' is on wrong device."
 
@@ -117,6 +124,56 @@ class TestCoralMTLModel:
 
         missing = [comp for comp in required_components if not component_checks[comp]]
         assert not missing, f"No non-zero gradients detected for components: {missing}"
+
+    def test_aux_tasks_none_handling(self, splitter_mtl, device):
+        """
+        Verifies that aux_tasks=None is properly handled (converted to empty list).
+        """
+        # Setup: Create model with aux_tasks=None
+        defined_tasks = splitter_mtl.hierarchical_definitions
+        num_classes = {
+            task: len(info["ungrouped"]["id2label"]) for task, info in defined_tasks.items()
+        }
+        # Use first task as primary, set aux_tasks=None
+        primary_tasks = list(defined_tasks.keys())[:1]
+        
+        model = CoralMTLModel(
+            encoder_name="mit_b0",
+            decoder_channel=32,
+            attention_dim=32,
+            num_classes=num_classes,
+            primary_tasks=primary_tasks,
+            aux_tasks=None  # Should be converted to []
+        ).to(device)
+        model.eval()
+        
+        dummy_images = torch.randn(2, 3, 32, 32, device=device)
+        
+        # Action
+        with torch.no_grad():
+            outputs = model(dummy_images)
+        
+        # Assertion: Should only have outputs for primary tasks
+        assert set(outputs.keys()) == set(primary_tasks), "Should only output primary tasks when aux_tasks=None"
+        assert len(outputs) == len(primary_tasks), "Output count should match primary tasks"
+
+    def test_requires_primary_task(self, splitter_mtl):
+        """
+        Verifies that CoralMTLModel raises ValueError when no primary tasks are provided.
+        """
+        num_classes = {
+            task: len(info["ungrouped"]["id2label"]) for task, info in splitter_mtl.hierarchical_definitions.items()
+        }
+        
+        with pytest.raises(ValueError, match="At least one primary task must be specified"):
+            CoralMTLModel(
+                encoder_name="mit_b0",
+                decoder_channel=32,
+                attention_dim=32,
+                num_classes=num_classes,
+                primary_tasks=[],  # Empty list should raise error
+                aux_tasks=[]
+            )
 
     def test_mode_switching(self, minimal_coral_mtl_model):
         """

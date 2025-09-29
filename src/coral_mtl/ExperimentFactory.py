@@ -177,7 +177,7 @@ class ExperimentFactory:
         if model_type == "CoralMTL":
             # For MTL, num_classes for each head comes from the splitter
             num_classes_dict = {
-                task: len(details['ungrouped']['id2label']) 
+                task: len(details['grouped']['id2label']) if details['is_grouped'] else len(details['ungrouped']['id2label'])
                 for task, details in self.task_splitter.hierarchical_definitions.items()
             }
             self.model = CoralMTLModel(
@@ -379,13 +379,7 @@ class ExperimentFactory:
         if loss_type == "CompositeHierarchical":
             num_classes_dict = {}
             for task_name, task_data in self.task_splitter.hierarchical_definitions.items():
-                # Check if task has grouped structure or ungrouped structure
-                if 'ungrouped' in task_data:
-                    num_classes_dict[task_name] = len(task_data['ungrouped']['id2label'])
-                elif 'id2label' in task_data:
-                    num_classes_dict[task_name] = len(task_data['id2label'])
-                else:
-                    raise ValueError(f"Task {task_name} has no valid id2label structure")
+                num_classes_dict[task_name] = len(task_data['grouped']['id2label']) if task_data['is_grouped'] else len(task_data['ungrouped']['id2label'])
             
             if not num_classes_dict:
                  raise ValueError("CoralMTLLoss requires 'task_definitions_path' to be set.")
@@ -399,9 +393,9 @@ class ExperimentFactory:
                 aux_tasks=aux_tasks,
                 weighting_strategy=strategy,
                 ignore_index=params.get('ignore_index', 0),
-                w_consistency=params.get('w_consistency', 0.1),
                 hybrid_alpha=params.get('hybrid_alpha', 0.5),
-                focal_gamma=params.get('focal_gamma', 2.0)
+                focal_gamma=params.get('focal_gamma', 2.0),
+                splitter=self.task_splitter  # Inject TaskSplitter for dynamic label resolution
             )
 
         elif loss_type == "HybridLoss":

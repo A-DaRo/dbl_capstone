@@ -15,8 +15,7 @@ def build_legacy_loss(num_classes, primary, aux):  # noqa: D401
         primary_tasks=primary,
         aux_tasks=aux,
         weighting_strategy=strategy,
-        ignore_index=0,
-        w_consistency=0.1
+        ignore_index=0
     )
 
 

@@ -92,7 +92,13 @@ def test_splitter_parses_hierarchical_definitions_structurally(task_definitions)
             grouped_info = task_data['grouped']
             assert 'id2label' in grouped_info
             assert 'class_names' in grouped_info
+            assert 'mapping_array' in grouped_info
+            assert isinstance(grouped_info['mapping_array'], np.ndarray)
             assert len(grouped_info['id2label']) == len(grouped_info['class_names'])
+            
+            # Add assertion for grouped mapping_array LUT semantics
+            assert len(grouped_info['mapping_array']) == splitter.max_original_id + 1, \
+                f"Task '{task_name}' grouped mapping_array should have length max_original_id+1 for LUT semantics"
             
             assert 'ungrouped_to_grouped_map' in task_data
             group_map = task_data['ungrouped_to_grouped_map']
@@ -148,7 +154,7 @@ def test_splitter_mtl_mask_transformation(splitter_mtl: MTLTaskSplitter):
     h, w = 2, (len(sample_ids) + 1) // 2
     original_mask = np.array(sample_ids + [0] * (h * w - len(sample_ids)), dtype=np.int64).reshape(h, w)
     
-    # Test transformations for each defined task
+    # Test ungrouped transformations for each defined task
     for task_name, task_data in splitter_mtl.hierarchical_definitions.items():
         mapping_array = task_data['ungrouped']['mapping_array']
         task_mask = mapping_array[original_mask]
@@ -165,6 +171,21 @@ def test_splitter_mtl_mask_transformation(splitter_mtl: MTLTaskSplitter):
                 assert mask_val_at_id > 0, f"ID {orig_id} should be in task '{task_name}' but was mapped to 0"
             else:
                 assert mask_val_at_id == 0, f"ID {orig_id} should NOT be in task '{task_name}' but was mapped to {mask_val_at_id}"
+        
+        # Test grouped transformations when is_grouped is True
+        if task_data.get('is_grouped', False):
+            grouped_mapping_array = task_data['grouped']['mapping_array']
+            grouped_task_mask = grouped_mapping_array[original_mask]
+            
+            # Same logic: original ID should map to non-zero in grouped space IF AND ONLY IF in task
+            for orig_id in sample_ids:
+                is_in_task = orig_id in task_original_ids
+                grouped_mask_val_at_id = grouped_task_mask[original_mask == orig_id][0]
+                
+                if is_in_task:
+                    assert grouped_mask_val_at_id > 0, f"ID {orig_id} should be in grouped task '{task_name}' but was mapped to 0"
+                else:
+                    assert grouped_mask_val_at_id == 0, f"ID {orig_id} should NOT be in grouped task '{task_name}' but was mapped to {grouped_mask_val_at_id}"
 
 
 # --- Test Group 4: `BaseTaskSplitter` Specifics ---

@@ -470,10 +470,13 @@ def minimal_coral_mtl_model(splitter_mtl):
     aux_tasks = all_tasks[num_primary:]
 
     # Ensure all tasks defined in the variant are accounted for in num_classes
-    num_classes = {
-        task: len(info['ungrouped']['id2label'])
-        for task, info in splitter_mtl.hierarchical_definitions.items()
-    }
+    # Use is_grouped logic to determine which label space to use
+    num_classes = {}
+    for task, info in splitter_mtl.hierarchical_definitions.items():
+        if info.get('is_grouped', False):
+            num_classes[task] = len(info['grouped']['id2label'])
+        else:
+            num_classes[task] = len(info['ungrouped']['id2label'])
 
     return CoralMTLModel(
         encoder_name='mit_b0',
