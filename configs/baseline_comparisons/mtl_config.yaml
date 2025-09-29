@@ -47,7 +47,7 @@ data:
   
   # Parameters for the final DataLoader object.
   # Use batch_size_per_gpu (factory fallback to batch_size if missing)
-  batch_size_per_gpu: 8
+  batch_size_per_gpu: 4
   num_workers: 16
   persistent_workers: true
   prefetch_factor: 3
@@ -82,7 +82,7 @@ loss:
     focal_gamma: 2.0
     ignore_index: 0
   weighting_strategy:
-    type: "Uncertainty"      
+    type: "NashMTL"      
 
 # --------------------------------------------------------------------------
 # Configuration for Metrics
