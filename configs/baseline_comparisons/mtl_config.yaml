@@ -82,7 +82,7 @@ loss:
     focal_gamma: 2.0
     ignore_index: 0
   weighting_strategy:
-    type: "GradNorm"      
+    type: "DWA"      
 
 # --------------------------------------------------------------------------
 # Configuration for Metrics
