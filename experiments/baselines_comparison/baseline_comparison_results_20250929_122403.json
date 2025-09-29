@@ -1,0 +1,27 @@
+{
+  "comparison_start_time": "2025-09-29T12:23:57.699546",
+  "modes_run": [
+    "baseline"
+  ],
+  "experiments": {
+    "baseline": {
+      "name": "baseline",
+      "config_path": "/workspace/dbl_capstone/configs/baseline_comparisons/baseline_config.yaml",
+      "start_time": "2025-09-29T12:23:57.706496",
+      "training_completed": true,
+      "evaluation_completed": false,
+      "training_metrics": null,
+      "test_metrics": null,
+      "error": "❌ Evaluation failed for baseline: CUDA out of memory. Tried to allocate 576.00 MiB. GPU 0 has a total capacity of 31.36 GiB of which 370.69 MiB is free. Process 16335 has 25.34 GiB memory in use. Including non-PyTorch memory, this process has 5.55 GiB memory in use. Of the allocated memory 4.89 GiB is allocated by PyTorch, and 77.08 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)",
+      "skip_training": true
+    }
+  },
+  "summary": {
+    "baseline": {
+      "success": false,
+      "error": "❌ Evaluation failed for baseline: CUDA out of memory. Tried to allocate 576.00 MiB. GPU 0 has a total capacity of 31.36 GiB of which 370.69 MiB is free. Process 16335 has 25.34 GiB memory in use. Including non-PyTorch memory, this process has 5.55 GiB memory in use. Of the allocated memory 4.89 GiB is allocated by PyTorch, and 77.08 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)",
+      "key_metrics": {}
+    }
+  },
+  "comparison_end_time": "2025-09-29T12:24:03.670139"
+}
