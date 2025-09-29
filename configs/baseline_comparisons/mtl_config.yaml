@@ -80,9 +80,11 @@ loss:
     w_consistency: 0.1
     hybrid_alpha: 0.5
     focal_gamma: 2.0
-    ignore_index: 99
+    ignore_index: 0
   weighting_strategy:
-    type: "DWA"           
+    type: "IMGrad"
+    params:
+      solver: qp            
 
 # --------------------------------------------------------------------------
 # Configuration for Metrics
@@ -94,8 +96,8 @@ metrics:
   
   # The class index to be ignored during metric calculation.
   # This should be consistent with the ignore_index in the loss function.
-  ignore_index: 99
-  
+  ignore_index: 0
+
   # Enable asynchronous storage to prevent blocking during per-image storage
   use_async_storage: true
 
@@ -105,7 +107,7 @@ metrics:
 optimizer:
   # This type is mapped to the `create_optimizer_and_scheduler` function.
   type: "AdamWPolyDecay"
-  use_pcgrad_wrapper: false  # Disable PCGrad to enable AMP and reduce backward overhead
+  use_pcgrad_wrapper: true  # Disable PCGrad to enable AMP and reduce backward overhead
   params:
     lr: 6.0e-5
     weight_decay: 0.01
@@ -129,7 +131,7 @@ trainer:
   output_dir: "experiments/baseline_comparisons/coral_mtl_b2_run"
   
   # Number of steps to accumulate gradients before performing an optimizer step.
-  gradient_accumulation_steps: 4
+  gradient_accumulation_steps: 1
   
   # Enable mixed precision training for faster training on compatible hardware
   use_mixed_precision: true
