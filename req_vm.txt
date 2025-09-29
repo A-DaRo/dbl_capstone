@@ -19,3 +19,9 @@ segmentation_models_pytorch
 tabulate
 simpleitk
 scikit-image
+jsonschema
+pytest
+pytest-cov
+cvxpy
+cvxopt
+ecoss
