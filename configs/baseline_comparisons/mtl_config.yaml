@@ -129,7 +129,7 @@ trainer:
   output_dir: "experiments/baseline_comparisons/coral_mtl_b2_run"
   
   # Number of steps to accumulate gradients before performing an optimizer step.
-  gradient_accumulation_steps: 1
+  gradient_accumulation_steps: 4
   
   # Enable mixed precision training for faster training on compatible hardware
   use_mixed_precision: true
