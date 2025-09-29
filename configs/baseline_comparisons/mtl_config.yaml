@@ -107,7 +107,7 @@ metrics:
 optimizer:
   # This type is mapped to the `create_optimizer_and_scheduler` function.
   type: "AdamWPolyDecay"
-  use_pcgrad_wrapper: true  # Disable PCGrad to enable AMP and reduce backward overhead
+  use_pcgrad_wrapper: false  # Disable PCGrad to enable AMP and reduce backward overhead
   params:
     lr: 6.0e-5
     weight_decay: 0.01
