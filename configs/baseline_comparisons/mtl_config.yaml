@@ -145,7 +145,7 @@ trainer:
   
   # The number of patches to process in a single batch during validation inference.
   # Lowered to reduce GPU memory pressure during validation
-  inference_batch_size: 8
+  inference_batch_size: 16
 
 # --------------------------------------------------------------------------
 # Configuration for the Evaluator Engine
@@ -163,15 +163,15 @@ evaluator:
   # Evaluator-specific inference settings (optimized for thorough testing)
   # Use slightly more conservative settings for final evaluation to ensure accuracy
   inference_stride: 320  # ~37% overlap for more thorough coverage
-  inference_batch_size: 8  # Lower batch size to prevent validation/test OOM
+  inference_batch_size: 16  # Lower batch size to prevent validation/test OOM
 
 metrics_processor:
   # Master switch to enable/disable the advanced metrics processing
-  enabled: false  # Disable during training; re-enable for final evaluation runs
+  enabled: true  # Disable during training; re-enable for final evaluation runs
   
   # Number of CPU worker processes for parallel computation
   # Recommend: Number of physical CPU cores (e.g., 30+ for high-end systems)
-  num_cpu_workers: 20
+  num_cpu_workers: 4
   
   # List of advanced metrics to compute
   # Available: ["ASSD", "HD95", "PanopticQuality", "ARI", "VI"]

@@ -128,7 +128,7 @@ trainer:
   
   # The number of patches to process in a single batch during validation inference.
   # Increased from 16 to 24 for better GPU utilization
-  inference_batch_size: 24
+  inference_batch_size: 16
 
 # --------------------------------------------------------------------------
 # Configuration for the Evaluator Engine
@@ -150,11 +150,11 @@ evaluator:
 
 metrics_processor:
   # Master switch to enable/disable the advanced metrics processing
-  enabled: false  # Disable during traisning; re-enable for final evaluation runs
+  enabled: true  # Disable during traisning; re-enable for final evaluation runs
   
   # Number of CPU worker processes for parallel computation
   # Recommend: Number of physical CPU cores (e.g., 30+ for high-end systems)
-  num_cpu_workers: 20
+  num_cpu_workers: 4
   
   # List of advanced metrics to compute
   # Available: ["ASSD", "HD95", "PanopticQuality", "ARI", "VI"]
