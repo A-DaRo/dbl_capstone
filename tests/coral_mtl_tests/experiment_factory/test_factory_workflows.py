@@ -12,7 +12,7 @@ import torch
 from unittest.mock import patch
 
 from coral_mtl.ExperimentFactory import ExperimentFactory
-from coral_mtl.engine.losses import CoralLoss, CoralMTLLoss
+from coral_mtl.engine.losses import CoralLoss
 from coral_mtl.engine.gradient_strategies import NashMTLStrategy
 from coral_mtl.engine.pcgrad import PCGrad
 
@@ -98,7 +98,7 @@ def test_run_training_mtl_pipeline(factory_config_kind, experiment_config_bundle
 
     trainer_mock.assert_called_once()
     trainer_kwargs = trainer_mock.call_args.kwargs
-    assert isinstance(trainer_kwargs['loss_fn'], CoralMTLLoss)
+    assert isinstance(trainer_kwargs['loss_fn'], CoralLoss)
     if expected_strategy_cls:
         assert isinstance(trainer_kwargs['loss_fn'].weighting_strategy, expected_strategy_cls)
     if use_pcgrad:
@@ -132,10 +132,7 @@ def test_run_evaluation_uses_loss_and_metrics(factory_config_kind, experiment_co
 
     evaluator_mock.assert_called_once()
     evaluator_kwargs = evaluator_mock.call_args.kwargs
-    if factory_config_kind == 'mtl':
-        assert isinstance(evaluator_kwargs['loss_fn'], CoralMTLLoss)
-    else:
-        assert isinstance(evaluator_kwargs['loss_fn'], CoralLoss)
+    assert isinstance(evaluator_kwargs['loss_fn'], CoralLoss)
 
     if metrics_enabled:
         processor_mock.assert_called_once()

@@ -1,7 +1,7 @@
 """Projected Conflicting Gradient (PCGrad) wrapper implementation."""
 from __future__ import annotations
 
-from typing import Iterable, List, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import torch
 
@@ -58,7 +58,13 @@ class PCGrad:
             projected[idx] = g_i
         return projected
 
-    def step(self, task_grads: List[Iterable[torch.Tensor]], params: List[torch.nn.Parameter]) -> None:
+    def step(
+        self,
+        task_grads: List[Iterable[torch.Tensor]],
+        params: List[torch.nn.Parameter],
+        *,
+        grad_clip_config: Optional[Dict[str, Any]] = None,
+    ) -> None:
         projected = self._project([list(g) for g in task_grads])
         final_grads: List[torch.Tensor | None] = []
         for grads_per_param in zip(*projected):
@@ -73,6 +79,16 @@ class PCGrad:
                 param.grad = None
             else:
                 param.grad = grad.clone()
+        if grad_clip_config:
+            params_with_grads = [p for p in params if p.grad is not None]
+            if params_with_grads:
+                clip_value = grad_clip_config.get('clip_value')
+                if clip_value is not None:
+                    torch.nn.utils.clip_grad_value_(params_with_grads, float(clip_value))
+                max_norm = grad_clip_config.get('max_norm')
+                if max_norm is not None:
+                    norm_type = grad_clip_config.get('norm_type', 2.0)
+                    torch.nn.utils.clip_grad_norm_(params_with_grads, float(max_norm), norm_type=norm_type)
         self.optimizer.step()
 
     def zero_grad(self) -> None:

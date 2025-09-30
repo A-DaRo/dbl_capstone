@@ -2,20 +2,22 @@
 from __future__ import annotations
 
 import torch
+import torch.nn as nn
 
-from coral_mtl.engine.losses import CoralMTLLoss
+from coral_mtl.engine.losses import CoralLoss, HybridSegmentationLoss
 from coral_mtl.engine.loss_weighting import UncertaintyWeightingStrategy
 
 
 def build_legacy_loss(num_classes, primary, aux):  # noqa: D401
     # Simulate ExperimentFactory legacy instantiation (no explicit strategy config)
     strategy = UncertaintyWeightingStrategy(primary + aux)
-    return CoralMTLLoss(
-        num_classes=num_classes,
-        primary_tasks=primary,
-        aux_tasks=aux,
+    per_task = nn.ModuleDict({
+        task: HybridSegmentationLoss(ignore_index=0) for task in primary + aux
+    })
+    return CoralLoss(
+        per_task_loss_fns=per_task,
         weighting_strategy=strategy,
-        ignore_index=0
+        mode="mtl",
     )
 
 

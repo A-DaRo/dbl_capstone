@@ -20,7 +20,7 @@ from .model.core import CoralMTLModel, BaselineSegformer
 from .data.dataset import CoralscapesMTLDataset, CoralscapesDataset
 from .data.augmentations import SegmentationAugmentation
 from .engine.optimizer import create_optimizer_and_scheduler
-from .engine.losses import CoralMTLLoss, CoralLoss
+from .engine.losses import CoralLoss, build_loss
 from .engine.loss_weighting import build_weighting_strategy
 from .engine.gradient_strategies import GradientUpdateStrategy
 from .metrics.metrics import AbstractCoralMetrics, CoralMTLMetrics, CoralMetrics
@@ -366,45 +366,24 @@ class ExperimentFactory:
         model_config = self.config.get('model', {})
         task_config = model_config.get('tasks', {})
 
-        primary_tasks = task_config.get('primary')
-        if primary_tasks is not None:
-            primary_tasks = list(primary_tasks)
+        primary_tasks = task_config.get('primary', []) or []
+        primary_tasks = list(primary_tasks)
         aux_tasks = task_config.get('auxiliary', []) or []
         aux_tasks = list(aux_tasks)
 
         if loss_type == "CompositeHierarchical" and not primary_tasks:
             raise ValueError("CompositeHierarchical loss requires 'model.tasks.primary' to be defined in the config.")
-        
-        # 2. Instantiate based on type
-        if loss_type == "CompositeHierarchical":
-            num_classes_dict = {}
-            for task_name, task_data in self.task_splitter.hierarchical_definitions.items():
-                num_classes_dict[task_name] = len(task_data['grouped']['id2label']) if task_data['is_grouped'] else len(task_data['ungrouped']['id2label'])
-            
-            if not num_classes_dict:
-                 raise ValueError("CoralMTLLoss requires 'task_definitions_path' to be set.")
-            
-            # Build weighting strategy (backward compatible: defaults to Uncertainty weighting)
-            weighting_cfg = loss_config.get('weighting_strategy')
-            strategy = build_weighting_strategy(weighting_cfg, primary_tasks, aux_tasks)
-            loss_fn = CoralMTLLoss(
-                num_classes=num_classes_dict,
-                primary_tasks=primary_tasks,
-                aux_tasks=aux_tasks,
-                weighting_strategy=strategy,
-                ignore_index=params.get('ignore_index', 0),
-                hybrid_alpha=params.get('hybrid_alpha', 0.5),
-                focal_gamma=params.get('focal_gamma', 2.0),
-                splitter=self.task_splitter  # Inject TaskSplitter for dynamic label resolution
-            )
 
-        elif loss_type == "HybridLoss":
-            loss_fn = CoralLoss(
-                primary_loss_type=params.get('primary_loss_type', 'focal'),
-                hybrid_alpha=params.get('hybrid_alpha', 0.5),
-                focal_gamma=params.get('focal_gamma', 2.0),
-                dice_smooth=params.get('dice_smooth', 1.0),
-                ignore_index=params.get('ignore_index', 0)
+        if loss_type in {"CompositeHierarchical", "HybridLoss"}:
+            if loss_type == "CompositeHierarchical":
+                weighting_cfg = loss_config.get('weighting_strategy')
+                strategy = build_weighting_strategy(weighting_cfg, primary_tasks, aux_tasks)
+            else:
+                strategy = None
+            loss_fn = build_loss(
+                splitter=self.task_splitter,
+                weighting_strategy=strategy,
+                loss_config=loss_config,
             )
 
         else:

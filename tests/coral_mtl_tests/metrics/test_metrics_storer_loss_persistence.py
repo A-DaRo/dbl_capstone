@@ -1,11 +1,12 @@
 import json
 from pathlib import Path
 import torch
+import torch.nn as nn
 import pytest
 from types import SimpleNamespace
 
 from coral_mtl.metrics.metrics_storer import MetricsStorer
-from coral_mtl.engine.losses import CoralMTLLoss
+from coral_mtl.engine.losses import CoralLoss, HybridSegmentationLoss
 from coral_mtl.engine.loss_weighting import build_weighting_strategy
 
 
@@ -43,7 +44,7 @@ def test_history_integration_train_val_namespacing(tmp_path):
 
 @pytest.mark.parametrize("with_aux", [True, False])
 def test_end_to_end_loss_and_test_report(tmp_path, device, with_aux):
-    """Mini integration: run CoralMTLLoss on synthetic data and persist test report."""
+    """Mini integration: run CoralLoss on synthetic data and persist test report."""
     # Setup synthetic tasks
     num_classes = {'genus': 3, 'health': 2}
     if with_aux:
@@ -51,7 +52,14 @@ def test_end_to_end_loss_and_test_report(tmp_path, device, with_aux):
     primary = ['genus', 'health']
     aux = [t for t in num_classes if t not in primary]
     strategy = build_weighting_strategy({'type': 'uncertainty'}, primary, aux)
-    loss_fn = CoralMTLLoss(num_classes, primary, aux, weighting_strategy=strategy, debug=True)
+    loss_fn = CoralLoss(
+        per_task_loss_fns=nn.ModuleDict({
+            task: HybridSegmentationLoss(ignore_index=-100)
+            for task in num_classes
+        }),
+        weighting_strategy=strategy,
+        mode="mtl",
+    )
 
     b,h,w = 2,8,8
     predictions = {}

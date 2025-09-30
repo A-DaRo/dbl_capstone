@@ -84,6 +84,10 @@ class Trainer:
         # GradScaler is only used for fp16; bf16 does not need scaling
         self.scaler = torch.amp.GradScaler(enabled=self.use_mixed_precision and self.mixed_precision_dtype == 'fp16')
         self.weighting_strategy = getattr(self.loss_fn, 'weighting_strategy', None)
+        clipping_getter = getattr(self.loss_fn, 'get_clipping_parameters', None)
+        self.gradient_clipping_config: Dict[str, Any] = (
+            clipping_getter() if callable(clipping_getter) else {}
+        )
         self._shared_params_registered = False
         if not self.pcgrad_enabled:
             self.pcgrad = None
@@ -107,6 +111,39 @@ class Trainer:
                     params = [p for p in self.model.parameters() if p.requires_grad]
                     self.weighting_strategy.register_shared_parameters(params)
                 self._shared_params_registered = True
+
+    def _collect_params_for_clipping(
+        self,
+        optimizer,
+        explicit_params: Optional[List[torch.nn.Parameter]] = None,
+    ) -> List[torch.nn.Parameter]:
+        params: List[torch.nn.Parameter] = []
+        if explicit_params is not None:
+            params.extend(p for p in explicit_params if p is not None and p.grad is not None)
+        else:
+            for group in optimizer.param_groups:
+                for param in group.get('params', []):
+                    if param is not None and param.grad is not None:
+                        params.append(param)
+        return params
+
+    def _maybe_clip_gradients(
+        self,
+        optimizer,
+        explicit_params: Optional[List[torch.nn.Parameter]] = None,
+    ) -> None:
+        if not self.gradient_clipping_config:
+            return
+        params = self._collect_params_for_clipping(optimizer, explicit_params)
+        if not params:
+            return
+        clip_value = self.gradient_clipping_config.get('clip_value')
+        if clip_value is not None:
+            torch.nn.utils.clip_grad_value_(params, float(clip_value))
+        max_norm = self.gradient_clipping_config.get('max_norm')
+        if max_norm is not None:
+            norm_type = self.gradient_clipping_config.get('norm_type', 2.0)
+            torch.nn.utils.clip_grad_norm_(params, float(max_norm), norm_type=norm_type)
 
     def _train_one_epoch(self, epoch_index: int):
         """Executes a single training epoch and returns averaged loss components (namespaced)."""
@@ -205,6 +242,7 @@ class Trainer:
             if manual_update_applied:
                 if (i + 1) % self.config.gradient_accumulation_steps == 0 or (i + 1) == len(self.train_loader):
                     base_optimizer = getattr(self.optimizer, 'optimizer', self.optimizer)
+                    self._maybe_clip_gradients(base_optimizer, params)
                     base_optimizer.step()
                     self.optimizer.zero_grad()
                     self.scheduler.step()
@@ -215,13 +253,17 @@ class Trainer:
                 self.scheduler.step()
             else:
                 total_loss = total_loss / self.config.gradient_accumulation_steps
-                if self.mixed_precision_dtype == 'fp16':
+                use_fp16_scaler = self.scaler.is_enabled()
+                if use_fp16_scaler:
                     self.scaler.scale(total_loss).backward()
                 else:
                     total_loss.backward()
 
                 if (i + 1) % self.config.gradient_accumulation_steps == 0 or (i + 1) == len(self.train_loader):
-                    if self.mixed_precision_dtype == 'fp16':
+                    if use_fp16_scaler:
+                        self.scaler.unscale_(self.optimizer)
+                    self._maybe_clip_gradients(self.optimizer)
+                    if use_fp16_scaler:
                         self.scaler.step(self.optimizer)
                         self.scaler.update()
                     else:
@@ -278,7 +320,7 @@ class Trainer:
             torch.autograd.grad(loss, params, retain_graph=True, allow_unused=True)
             for loss in task_losses
         ]
-        self.pcgrad.step(task_grads, params)
+        self.pcgrad.step(task_grads, params, grad_clip_config=self.gradient_clipping_config or None)
 
     @staticmethod
     def _tensor_dict_to_floats(tensors: Dict[str, torch.Tensor]) -> Dict[str, float]:

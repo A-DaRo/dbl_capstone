@@ -16,7 +16,7 @@ from coral_mtl.ExperimentFactory import ExperimentFactory
 from coral_mtl.model.core import BaselineSegformer, CoralMTLModel
 from coral_mtl.metrics.metrics import CoralMetrics, CoralMTLMetrics
 from coral_mtl.metrics.metrics_storer import MetricsStorer
-from coral_mtl.engine.losses import CoralLoss, CoralMTLLoss
+from coral_mtl.engine.losses import CoralLoss
 from coral_mtl.engine.loss_weighting import (
     UncertaintyWeightingStrategy,
 )
@@ -187,7 +187,7 @@ def test_get_loss_function_mtl_weighting(factory_section_config, experiment_conf
 
     factory = ExperimentFactory(config_dict=cfg)
     loss_fn = factory.get_loss_function()
-    assert isinstance(loss_fn, CoralMTLLoss)
+    assert isinstance(loss_fn, CoralLoss)
     assert isinstance(loss_fn.weighting_strategy, expected_cls)
 
 

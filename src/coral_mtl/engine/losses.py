@@ -1,319 +1,244 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, Optional, List, Tuple, TYPE_CHECKING
+from typing import Any, Dict, Optional, Tuple, Union, TYPE_CHECKING
+
 import segmentation_models_pytorch as smp
+
 from .loss_weighting import WeightingStrategy
-import math
 
 if TYPE_CHECKING:
     from ..utils.task_splitter import TaskSplitter
 
-EPS = 1e-7  # global epsilon for numerical stability
+EPS = 1e-7
+BASELINE_TASK_KEY = "flattened"
 
-# --- Baseline Loss Function ---
 
-class CoralLoss(nn.Module):
-    """
-    A flexible, single-task hybrid loss function for baselining on the Coralscapes dataset.
-    It combines a primary classification loss (Focal or Cross-Entropy) with Dice Loss.
-    This is NOT a multi-task loss and does not use uncertainty weighting.
-    """
-    def __init__(self,
-                 primary_loss_type: str = 'focal',
-                 hybrid_alpha: float = 0.5,
-                 focal_gamma: float = 2.0,
-                 dice_smooth: float = 1.0,
-                 class_weights: Optional[torch.Tensor] = None,
-                 ignore_index: int = -100):
-        """
-        Args:
-            primary_loss_type (str): The main classification loss. One of ['focal', 'cross_entropy'].
-            hybrid_alpha (float): Weight for the primary loss. Dice Loss weight is (1 - alpha).
-            focal_gamma (float): Focusing parameter for Focal Loss (used if primary_loss_type='focal').
-            dice_smooth (float): Smoothing factor for Dice Loss.
-            class_weights (torch.Tensor, optional): Optional class weights for Cross-Entropy.
-            ignore_index (int): Specifies a target value to be ignored by all loss components.
-        """
+class HybridSegmentationLoss(nn.Module):
+    """Hybrid focal + dice loss used for individual segmentation tasks."""
+
+    def __init__(
+        self,
+        hybrid_alpha: float = 0.5,
+        focal_gamma: float = 2.0,
+        dice_smooth: float = 1.0,
+        ignore_index: int = 0,
+    ) -> None:
         super().__init__()
-        
-        if primary_loss_type not in ['focal', 'cross_entropy']:
-            raise ValueError(f"primary_loss_type must be 'focal' or 'cross_entropy', but got {primary_loss_type}")
-            
-        self.hybrid_alpha = hybrid_alpha
-        self.primary_loss_type = primary_loss_type
-        self.ignore_index = ignore_index
-        
-        # Instantiate primary loss component based on the choice
-        if primary_loss_type == 'focal':
-            self.primary_loss = smp.losses.FocalLoss(
-                mode='multiclass',
-                gamma=focal_gamma,
-                ignore_index=ignore_index
-            )
-            self.cross_entropy_fallback = nn.CrossEntropyLoss(
-                weight=class_weights,
-                ignore_index=ignore_index
-            )
-        elif primary_loss_type == 'cross_entropy':
-            self.primary_loss = nn.CrossEntropyLoss(
-                weight=class_weights,
-                ignore_index=ignore_index
-            )
-            self.cross_entropy_fallback = self.primary_loss
-        
-        # NOTE: we keep smp DiceLoss but wrap with additional epsilon guard in forward
+        self.hybrid_alpha = float(hybrid_alpha)
+        self.ignore_index = int(ignore_index)
+        self.focal_loss = smp.losses.FocalLoss(
+            mode="multiclass",
+            gamma=float(focal_gamma),
+            ignore_index=self.ignore_index,
+        )
+        self.cross_entropy_fallback = nn.CrossEntropyLoss(ignore_index=self.ignore_index)
         self.dice_loss = smp.losses.DiceLoss(
-            mode='multiclass',
-            ignore_index=ignore_index,
-            smooth=dice_smooth
+            mode="multiclass",
+            ignore_index=self.ignore_index,
+            smooth=float(dice_smooth),
         )
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        # Check for NaN inputs
         if torch.any(torch.isnan(logits)):
-            print("Warning: NaN detected in CombinedLoss logits")
+            print("Warning: NaN detected in HybridSegmentationLoss logits")
             return torch.tensor(1.0, device=logits.device, requires_grad=True)
-        
+
         if torch.any(torch.isnan(targets)):
-            print("Warning: NaN detected in CombinedLoss targets")
+            print("Warning: NaN detected in HybridSegmentationLoss targets")
             return torch.tensor(1.0, device=logits.device, requires_grad=True)
-            
-        loss_primary = self.primary_loss(logits, targets.long())
-        # Dice can return NaN if both prediction & target have no foreground; guard it
-        loss_dice = self.dice_loss(logits, targets.long())
+
+        targets_long = targets.long()
+        loss_primary = self.focal_loss(logits, targets_long)
+        loss_dice = self.dice_loss(logits, targets_long)
         if torch.isnan(loss_dice):
-            # Re-compute a manual safe dice fallback (very rare)
             with torch.no_grad():
-                probs = F.softmax(logits, dim=1)
-                targ = targets.long()
-                valid_mask = (targ != self.ignore_index)
+                probabilities = F.softmax(logits, dim=1)
+                valid_mask = (targets_long != self.ignore_index)
                 if valid_mask.any():
-                    one_hot = F.one_hot(torch.clamp(targ, min=0), num_classes=probs.shape[1]).permute(0,3,1,2).float()
+                    one_hot = F.one_hot(
+                        torch.clamp(targets_long, min=0), num_classes=probabilities.shape[1]
+                    ).permute(0, 3, 1, 2).float()
                     one_hot = one_hot * valid_mask.unsqueeze(1)
-                    intersect = (probs * one_hot).sum(dim=(0,2,3))
-                    denom = probs.sum(dim=(0,2,3)) + one_hot.sum(dim=(0,2,3)) + EPS
-                    manual_dice = 1 - (2*intersect / denom).mean()
+                    intersection = (probabilities * one_hot).sum(dim=(0, 2, 3))
+                    denominator = probabilities.sum(dim=(0, 2, 3)) + one_hot.sum(dim=(0, 2, 3)) + EPS
+                    manual_dice = 1 - (2 * intersection / denominator).mean()
                 else:
                     manual_dice = torch.tensor(0.0, device=logits.device)
             loss_dice = manual_dice.detach().requires_grad_(True)
-        
-        # Check for NaN in loss components
+
         if torch.isnan(loss_primary):
-            print("Warning: NaN detected in primary loss component; recomputing with cross-entropy fallback")
-            loss_primary = self.cross_entropy_fallback(logits, targets.long())
-            
+            print("Warning: NaN detected in focal component; recomputing with cross-entropy fallback")
+            loss_primary = self.cross_entropy_fallback(logits, targets_long)
+
         if torch.isnan(loss_dice):
-            print("Warning: NaN detected in dice loss component")
+            print("Warning: NaN detected in dice component")
             loss_dice = torch.tensor(0.5, device=logits.device, requires_grad=True)
-        
-        # Only add dice loss if its weight is > 0 to avoid unnecessary computation
+
         if self.hybrid_alpha < 1.0:
             total_loss = self.hybrid_alpha * loss_primary + (1 - self.hybrid_alpha) * loss_dice
         else:
             total_loss = loss_primary
-            
-        # Final NaN check
+
         if torch.isnan(total_loss):
-            print("Warning: NaN detected in CombinedLoss total loss")
+            print("Warning: NaN detected in HybridSegmentationLoss total output")
             total_loss = torch.tensor(1.0, device=logits.device, requires_grad=True)
-            
+
         return total_loss
 
-# --- Main Composite Loss Function ---
+class CoralLoss(nn.Module):
+    """Unified loss orchestrator handling MTL and baseline configurations."""
 
-class CoralMTLLoss(nn.Module):
-    """Multi-task loss orchestration delegating weighting to a strategy.
-
-    Responsibilities post-refactor (Phase B):
-      1. Compute raw per-task losses (primary: hybrid, auxiliary: CE).
-      2. Apply optional logical consistency regularizer.
-      3. Delegate aggregation / balancing to injected `WeightingStrategy`.
-      4. Return comprehensive dict of components (unweighted + weighted + aux losses).
-    """
-    def __init__(self,
-                 num_classes: Dict[str, int],
-                 primary_tasks: List[str],
-                 aux_tasks: List[str],
-                 weighting_strategy: 'WeightingStrategy',
-                 class_weights: Optional[Dict[str, torch.Tensor]] = None,
-                 ignore_index: int = -100,
-                 hybrid_alpha: float = 0.5,
-                 focal_gamma: float = 2.0,
-                 debug: bool = False,
-                 splitter: Optional['TaskSplitter'] = None):
+    def __init__(
+        self,
+        per_task_loss_fns: nn.ModuleDict,
+        weighting_strategy: Optional[WeightingStrategy],
+        mode: str,
+        *,
+        clipping_config: Optional[Dict[str, Any]] = None,
+        task_splitter: Optional["TaskSplitter"] = None,
+    ) -> None:
         super().__init__()
-        self.num_classes = num_classes
-        self.ignore_index = ignore_index
-        self.debug = debug
+        if mode not in {"mtl", "baseline"}:
+            raise ValueError(f"Unsupported loss mode '{mode}'. Expected 'mtl' or 'baseline'.")
+        if not per_task_loss_fns:
+            raise ValueError("per_task_loss_fns must contain at least one task-specific loss module")
+
+        self.per_task_loss_fns = per_task_loss_fns
         self.weighting_strategy = weighting_strategy
-        self.splitter = splitter
-        self._running_stats = {
-            'steps': 0,
-            'per_task_loss_mean': {},
-            'per_task_loss_m2': {}
-        }
+        self.mode = mode
+        self.tasks = list(per_task_loss_fns.keys())
+        self._baseline_task = self.tasks[0] if mode == "baseline" else None
+        self.clipping_config = dict(clipping_config or {})
+        self.task_splitter = task_splitter
 
-        self.primary_tasks = primary_tasks
-        self.aux_tasks = aux_tasks
-        self.primary_loss_fn = CoralLoss(
-            hybrid_alpha=hybrid_alpha,
-            focal_gamma=focal_gamma,
-            ignore_index=self.ignore_index
-        )
-        class_weights = class_weights if class_weights is not None else {}
-        self.aux_losses = nn.ModuleDict({
-            task: nn.CrossEntropyLoss(
-                weight=class_weights.get(task),
-                ignore_index=self.ignore_index
-            )
-            for task in self.aux_tasks if task in self.num_classes
-        })
-        if self.debug:
-            print(f"[CoralMTLLoss] Initialized (Strategy={self.weighting_strategy.__class__.__name__}) | primary={self.primary_tasks} aux={self.aux_tasks} ignore_index={ignore_index}")
-
-
-
-    def _validate_task_predictions(self, task: str, predictions_tensor: torch.Tensor) -> bool:
-        """
-        Validate that prediction tensor has the correct number of channels for the task.
-        
-        Args:
-            task (str): Task name
-            predictions_tensor (torch.Tensor): Model predictions tensor (N, C, H, W)
-            
-        Returns:
-            bool: True if valid, False if mismatch detected
-        """
-        expected_classes = self.num_classes.get(task)
-        if expected_classes is None:
-            if self.debug:
-                print(f"[CoralMTLLoss] Task '{task}' not found in num_classes config -> skipping")
-            return False
-            
-        actual_classes = predictions_tensor.shape[1]
-        if actual_classes != expected_classes:
-            print(f"[CoralMTLLoss] WARNING: Task '{task}' prediction shape mismatch - "
-                  f"got {actual_classes} channels, expected {expected_classes} classes. Skipping task loss.")
-            return False
-            
-        return True
-
-    def _update_running_stats(self, loss_map: Dict[str, torch.Tensor]):
-        if not self.debug:
-            return
-        self._running_stats['steps'] += 1
-        for k, v in loss_map.items():
-            if not k.startswith('unweighted_'):
-                continue
-            val = float(v.detach().item())
-            if k not in self._running_stats['per_task_loss_mean']:
-                self._running_stats['per_task_loss_mean'][k] = val
-                self._running_stats['per_task_loss_m2'][k] = 0.0
+    def _standardize_inputs(
+        self,
+        predictions: Union[Dict[str, torch.Tensor], torch.Tensor],
+        targets: Union[Dict[str, torch.Tensor], torch.Tensor],
+    ) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+        if self.mode == "baseline":
+            assert self._baseline_task is not None
+            if isinstance(predictions, dict):
+                prediction_tensor = next(iter(predictions.values())) if predictions else None
             else:
-                mean = self._running_stats['per_task_loss_mean'][k]
-                m2 = self._running_stats['per_task_loss_m2'][k]
-                n = self._running_stats['steps']
-                delta = val - mean
-                mean += delta / n
-                m2 += delta * (val - mean)
-                self._running_stats['per_task_loss_mean'][k] = mean
-                self._running_stats['per_task_loss_m2'][k] = m2
-        if self._running_stats['steps'] % 50 == 0:
-            summary = {t: round(self._running_stats['per_task_loss_mean'][t],4) for t in self._running_stats['per_task_loss_mean']}
-            print(f"[CoralMTLLoss][debug] running mean unweighted losses: {summary}")
+                prediction_tensor = predictions
+            if isinstance(targets, dict):
+                target_tensor = next(iter(targets.values())) if targets else None
+            else:
+                target_tensor = targets
+            pred_dict = {self._baseline_task: prediction_tensor} if prediction_tensor is not None else {}
+            target_dict = {self._baseline_task: target_tensor} if target_tensor is not None else {}
+        else:
+            if not isinstance(predictions, dict) or not isinstance(targets, dict):
+                raise TypeError("MTL mode requires dictionary inputs for predictions and targets")
+            pred_dict = {task: predictions[task] for task in self.tasks if task in predictions}
+            target_dict = {task: targets[task] for task in self.tasks if task in targets}
+        return pred_dict, target_dict
 
-    def compute_unweighted_losses(self, predictions: Dict[str, torch.Tensor], targets: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        """Compute and return per-task unweighted losses (primary + auxiliary).
+    def _compute_unweighted_from_dict(
+        self,
+        standardized_predictions: Dict[str, torch.Tensor],
+        standardized_targets: Dict[str, torch.Tensor],
+    ) -> Dict[str, torch.Tensor]:
+        unweighted: Dict[str, torch.Tensor] = {}
+        for task, loss_module in self.per_task_loss_fns.items():
+            prediction = standardized_predictions.get(task)
+            target = standardized_targets.get(task)
+            if prediction is None or target is None:
+                continue
+            unweighted[task] = loss_module(prediction, target)
+        return unweighted
 
-        This isolates raw task loss computation so gradient-based strategies
-        can perform multiple backward passes externally.
-        """
-        unweighted_primary_losses: Dict[str, torch.Tensor] = {}
-        for task in self.primary_tasks:
-            if task in predictions and task in targets:
-                unweighted_primary_losses[task] = self.primary_loss_fn(predictions[task], targets[task])
-        unweighted_aux_losses: Dict[str, torch.Tensor] = {}
-        for task in self.aux_tasks:
-            if task in predictions and task in targets and task in self.aux_losses:
-                unweighted_aux_losses[task] = self.aux_losses[task](predictions[task], targets[task].long())
-        merged = {**unweighted_primary_losses, **unweighted_aux_losses}
-        return merged
-
-    def forward(self,
-                predictions: Dict[str, torch.Tensor],
-                targets: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        
-        loss_dict = {}
-        
-        # --- 1. Calculate Individual Task Losses ---
-        unweighted_primary_losses = {}
-        for task in self.primary_tasks:
-            if task in predictions and task in targets:
-                # Validate prediction tensor shape before computing loss
-                if not self._validate_task_predictions(task, predictions[task]):
-                    continue
-                unweighted_primary_losses[task] = self.primary_loss_fn(predictions[task], targets[task])
-
-        unweighted_aux_losses = {}
-        for task in self.aux_tasks:
-            if task in predictions and task in targets:
-                # Validate prediction tensor shape before computing loss
-                if not self._validate_task_predictions(task, predictions[task]):
-                    continue
-                aux_loss = self.aux_losses[task](predictions[task], targets[task].long())
-                if torch.isnan(aux_loss):
-                    if self.debug:
-                        print(f"[CoralMTLLoss] NaN detected in auxiliary loss for task '{task}' -> replacing with 0")
-                    aux_loss = torch.zeros_like(aux_loss)
-                unweighted_aux_losses[task] = aux_loss
-        
+    @staticmethod
+    def _infer_device(
+        predictions: Dict[str, torch.Tensor], targets: Dict[str, torch.Tensor]
+    ) -> torch.device:
         if predictions:
-            base_device = next(iter(predictions.values())).device
-        elif targets:
-            base_device = next(iter(targets.values())).device
-        else:
-            base_device = torch.device('cpu')
+            return next(iter(predictions.values())).device
+        if targets:
+            return next(iter(targets.values())).device
+        return torch.device("cpu")
 
-        loss_auxiliary_sum = sum(unweighted_aux_losses.values()) if unweighted_aux_losses else \
-            torch.tensor(0.0, device=base_device)
+    def compute_unweighted_losses(
+        self,
+        predictions: Union[Dict[str, torch.Tensor], torch.Tensor],
+        targets: Union[Dict[str, torch.Tensor], torch.Tensor],
+    ) -> Dict[str, torch.Tensor]:
+        pred_dict, target_dict = self._standardize_inputs(predictions, targets)
+        return self._compute_unweighted_from_dict(pred_dict, target_dict)
 
-        # --- 2. Build unified raw losses dict for strategy ---
-        raw_losses: Dict[str, torch.Tensor] = {}
-        raw_losses.update(unweighted_primary_losses)
-        # Represent auxiliary as either individual tasks (preferred for strategy transparency)
-        raw_losses.update(unweighted_aux_losses)
-        if raw_losses:
-            self.weighting_strategy.cache_unweighted_losses(raw_losses)
-            weighted = self.weighting_strategy(raw_losses)
-        else:
-            weighted = {'total_loss': torch.zeros((), device=base_device)}
-        
-        if not torch.isfinite(weighted['total_loss']):
-            if self.debug:
-                print(f"[CoralMTLLoss] Non-finite total loss detected post-strategy (value={weighted['total_loss']}).")
-            weighted['total_loss'] = torch.nan_to_num(weighted['total_loss'], nan=1.0, posinf=1.0, neginf=1.0)
-        # --- 4. Aggregate primary/auxiliary balanced losses for reporting ---
-        primary_terms = [weighted[f'weighted_{t}_loss'] for t in self.primary_tasks if f'weighted_{t}_loss' in weighted]
-        aux_terms = [weighted[f'weighted_{t}_loss'] for t in self.aux_tasks if f'weighted_{t}_loss' in weighted]
-        if primary_terms:
-            weighted['primary_balanced_loss'] = sum(primary_terms)
-        else:
-            weighted['primary_balanced_loss'] = torch.zeros((), device=base_device)
-        if aux_terms:
-            weighted['aux_balanced_loss'] = sum(aux_terms)
-        else:
-            weighted['aux_balanced_loss'] = torch.zeros((), device=base_device)
+    def forward(
+        self,
+        predictions: Union[Dict[str, torch.Tensor], torch.Tensor],
+        targets: Union[Dict[str, torch.Tensor], torch.Tensor],
+    ) -> Dict[str, torch.Tensor]:
+        pred_dict, target_dict = self._standardize_inputs(predictions, targets)
+        unweighted = self._compute_unweighted_from_dict(pred_dict, target_dict)
+        device = self._infer_device(pred_dict, target_dict)
 
-        # --- 5. Compose final dict: unweighted_* + weighted outputs ---
-        for task, loss in unweighted_primary_losses.items():
-            weighted[f'unweighted_{task}_loss'] = loss
-        for task, loss in unweighted_aux_losses.items():
-            weighted[f'unweighted_{task}_loss'] = loss
-        
-        weighted['unweighted_aux_loss_sum'] = loss_auxiliary_sum
-        
-        # Running stats
-        self._update_running_stats(weighted)
-        
+        if self.weighting_strategy is not None and unweighted:
+            weighted = self.weighting_strategy(unweighted)
+        elif unweighted:
+            total = sum(unweighted.values())
+            weighted = {"total_loss": total}
+        else:
+            weighted = {"total_loss": torch.zeros((), device=device)}
+
+        for task_name, loss_value in unweighted.items():
+            weighted[f"unweighted_{task_name}_loss"] = loss_value
+
         return weighted
+
+    def get_clipping_parameters(self) -> Dict[str, Any]:
+        return dict(self.clipping_config)
+
+
+def build_loss(
+    splitter: "TaskSplitter",
+    weighting_strategy: Optional[WeightingStrategy],
+    loss_config: Dict[str, Any],
+) -> CoralLoss:
+    from ..utils.task_splitter import BaseTaskSplitter, MTLTaskSplitter
+
+    params = (loss_config or {}).get("params", {})
+    default_alpha = params.get("hybrid_alpha", 0.5)
+    default_gamma = params.get("focal_gamma", 2.0)
+    dice_smooth = params.get("dice_smooth", 1.0)
+    ignore_index = params.get("ignore_index", 0)
+    clipping_config = params.get("gradient_clipping")
+    if clipping_config is not None and not isinstance(clipping_config, dict):
+        raise ValueError("loss.params.gradient_clipping must be a mapping when provided")
+
+    task_specific: Dict[str, Dict[str, Any]] = params.get("task_specific", {})
+
+    if isinstance(splitter, MTLTaskSplitter):
+        mode = "mtl"
+        available_tasks = list(splitter.hierarchical_definitions.keys())
+        if weighting_strategy is not None and getattr(weighting_strategy, 'tasks', None):
+            task_names = [task for task in weighting_strategy.tasks if task in available_tasks]
+        else:
+            task_names = available_tasks
+    elif isinstance(splitter, BaseTaskSplitter):
+        mode = "baseline"
+        task_names = [BASELINE_TASK_KEY]
+    else:
+        raise TypeError("Unsupported splitter type for build_loss")
+
+    per_task_losses = nn.ModuleDict()
+    for task_name in task_names:
+        overrides = task_specific.get(task_name, {})
+        per_task_losses[task_name] = HybridSegmentationLoss(
+            hybrid_alpha=overrides.get("hybrid_alpha", default_alpha),
+            focal_gamma=overrides.get("focal_gamma", default_gamma),
+            dice_smooth=overrides.get("dice_smooth", dice_smooth),
+            ignore_index=overrides.get("ignore_index", ignore_index),
+        )
+
+    return CoralLoss(
+        per_task_loss_fns=per_task_losses,
+        weighting_strategy=weighting_strategy,
+        mode=mode,
+        clipping_config=clipping_config,
+        task_splitter=splitter,
+    )
