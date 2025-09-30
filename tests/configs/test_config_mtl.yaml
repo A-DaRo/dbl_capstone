@@ -73,8 +73,10 @@ loss:
     hybrid_alpha: 0.5
     focal_gamma: 2.0
     ignore_index: 0
-  weighting_strategy:
-    type: "NashMTL"           
+    gradient_clipping:
+      max_norm: 1.0
+    weighting_strategy:
+    type: "NashMTL"       
 # --------------------------------------------------------------------------
 # Configuration for Metrics
 # --------------------------------------------------------------------------
@@ -96,7 +98,6 @@ metrics:
 optimizer:
   # This type is mapped to the `create_optimizer_and_scheduler` function.
   type: "AdamWPolyDecay"
-  use_pcgrad_wrapper: true  # Enable PCGrad
   params:
     lr: 6.0e-5
     weight_decay: 0.01

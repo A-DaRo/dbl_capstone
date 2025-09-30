@@ -9,6 +9,7 @@ ExperimentFactory wiring is validated exactly as specified.
 
 from __future__ import annotations
 
+import argparse
 import copy
 import json
 import shutil
@@ -115,16 +116,39 @@ def run_trial(config_name: str, use_pds: bool) -> Dict[str, Any]:
 
 
 def main() -> None:
-	"""Entry point for the standalone smoke run."""
+    """Entry point for the standalone smoke run."""
 
-	overall_results: Dict[str, Dict[str, Any]] = {}
-	for config_name in CONFIG_REGISTRY:
-		for use_pds in (False, True):
-			result_key = f"{config_name}_{'pds' if use_pds else 'nopds'}"
-			overall_results[result_key] = run_trial(config_name, use_pds)
+    parser = argparse.ArgumentParser(description="Run baseline and MTL training pipelines.")
+    parser.add_argument(
+        '--mode',
+        choices=['baseline', 'mtl', 'both'],
+        default='both',
+        help='Specific mode to run (default: both)'
+    )
+    parser.add_argument(
+        '--skip-training',
+        action='store_true',
+        help='Skip training and run evaluation only'
+    )
+    args = parser.parse_args()
 
-	print("\n=== Summary ===")
-	print(json.dumps(overall_results, indent=2))
+    overall_results: Dict[str, Dict[str, Any]] = {}
+    modes_to_run = [args.mode] if args.mode != 'both' else CONFIG_REGISTRY.keys()
+
+    for config_name in modes_to_run:
+        for use_pds in (False, True):
+            result_key = f"{config_name}_{'pds' if use_pds else 'nopds'}"
+            if args.skip_training:
+                print(f"\n=== Skipping training for {config_name.upper()} | PDS={'ON' if use_pds else 'OFF'} ===")
+                factory = ExperimentFactory(config_dict=_configure_pds(yaml.safe_load(CONFIG_REGISTRY[config_name].read_text()), use_pds=use_pds))
+                metrics = factory.run_evaluation()
+                summary = _summarize_metrics(metrics)
+                overall_results[result_key] = {"metrics": summary}
+            else:
+                overall_results[result_key] = run_trial(config_name, use_pds)
+
+    print("\n=== Summary ===")
+    print(json.dumps(overall_results, indent=2))
 
 
 if __name__ == "__main__":

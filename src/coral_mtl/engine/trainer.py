@@ -149,15 +149,13 @@ class Trainer:
         """Executes a single training epoch and returns averaged loss components (namespaced)."""
         self.model.train()
         self._maybe_register_gradnorm_params()
-        loop = tqdm(self.train_loader, desc=f"Training Epoch", leave=False)
+        loop = tqdm(self.train_loader, desc=f"Training Epoch {epoch_index}", leave=False)
         epoch_train_losses = defaultdict(list)
+        params_with_grad = [p for p in self.model.parameters() if p.requires_grad]
 
         for i, batch in enumerate(loop):
             diagnostics_payload: Dict[str, Any] = {}
-            manual_update_applied = False
-            # The 'masks' key holds the appropriately transformed GT for the loss function
             images = batch['image'].to(self.device, non_blocking=True)
-            # Use 'masks' for MTL (dict) or 'mask' for baseline (tensor)
             masks_for_loss = batch.get('masks', batch.get('mask'))
             
             if isinstance(masks_for_loss, dict):
@@ -165,124 +163,111 @@ class Trainer:
             else:
                 masks_for_loss = masks_for_loss.to(self.device, non_blocking=True)
 
-            # Select proper dtype for autocast
             autocast_dtype = torch.bfloat16 if self.mixed_precision_dtype == 'bf16' else torch.float16
             with torch.amp.autocast(device_type=self.device.type, dtype=autocast_dtype, enabled=self.use_mixed_precision):
                 predictions = self.model(images)
-                
-                # Shape assertions before loss computation
                 self._validate_predictions_targets_shape(predictions, masks_for_loss)
-                
-                # Branch depending on strategy type
-                if isinstance(getattr(self.loss_fn, 'weighting_strategy', None), GradientUpdateStrategy):
-                    # Gradient-based strategy path
-                    unweighted = self.loss_fn.compute_unweighted_losses(predictions, masks_for_loss if isinstance(masks_for_loss, dict) else {k: masks_for_loss for k in getattr(self.loss_fn, 'primary_tasks', [])})
-                    diagnostics_payload['unweighted_losses'] = self._tensor_dict_to_floats(unweighted)
-                    per_task_grads = {}
-                    params = [p for p in self.model.parameters() if p.requires_grad]
-                    flat_shapes = [p.shape for p in params]
-                    numels = [p.numel() for p in params]
-                    for t_name, t_loss in unweighted.items():
+
+                # --- Main Optimization Logic: Three mutually exclusive paths ---
+
+                if self.pcgrad_enabled:
+                    # --- Path 1: PCGrad (Gradient-space projection) ---
+                    self.optimizer.zero_grad()
+                    
+                    unweighted_losses = self.loss_fn.compute_unweighted_losses(predictions, masks_for_loss)
+                    task_losses = list(unweighted_losses.values())
+                    
+                    if task_losses:
+                        task_grads = [
+                            torch.autograd.grad(loss, params_with_grad, retain_graph=True, allow_unused=True)
+                            for loss in task_losses
+                        ]
+                        self.pcgrad.step(task_grads, params_with_grad, grad_clip_config=self.gradient_clipping_config)
+                    
+                    self.scheduler.step()
+                    # For logging purposes
+                    loss_dict_for_logging = unweighted_losses
+                    total_loss_for_logging = torch.stack(task_losses).mean() if task_losses else torch.tensor(0.0)
+
+                elif isinstance(self.weighting_strategy, GradientUpdateStrategy):
+                    # --- Path 2: Gradient-based Strategies (e.g., Nash-MTL, IMGrad) ---
+                    unweighted_losses = self.loss_fn.compute_unweighted_losses(predictions, masks_for_loss)
+                    diagnostics_payload['unweighted_losses'] = self._tensor_dict_to_floats(unweighted_losses)
+                    
+                    per_task_grads, numels = {}, [p.numel() for p in params_with_grad]
+                    for t_name, t_loss in unweighted_losses.items():
                         self.optimizer.zero_grad()
-                        (t_loss / self.config.gradient_accumulation_steps).backward(retain_graph=True)
-                        grads_flat = []
-                        for p in params:
-                            if p.grad is None:
-                                grads_flat.append(torch.zeros(p.numel(), device=self.device, dtype=p.dtype))
-                            else:
-                                grads_flat.append(p.grad.detach().clone().flatten())
-                        per_task_grads[t_name] = torch.cat(grads_flat)
-                    # combine
-                    update_vec = self.loss_fn.weighting_strategy.compute_update_vector(per_task_grads)
-                    # Diagnostics captured after strategy computation
-                    grad_norm, grad_cos = self._compute_gradient_diagnostics(per_task_grads)
-                    diagnostics_payload['gradient_norm'] = grad_norm
-                    if grad_cos:
-                        diagnostics_payload['gradient_cosine_similarity'] = grad_cos
-                    strategy_diagnostics = getattr(self.loss_fn.weighting_strategy, 'get_last_diagnostics', None)
-                    if callable(strategy_diagnostics):
-                        diagnostics_payload.update(self.loss_fn.weighting_strategy.get_last_diagnostics())
-                    diagnostics_payload.setdefault('gradient_update_norm', float(update_vec.norm().detach().item()))
-                    # apply combined gradient
+                        t_loss.backward(retain_graph=True)
+                        grads_flat = torch.cat([
+                            p.grad.detach().clone().flatten() if p.grad is not None else torch.zeros(p.numel(), device=self.device)
+                            for p in params_with_grad
+                        ])
+                        per_task_grads[t_name] = grads_flat
+
+                    update_vec = self.weighting_strategy.compute_update_vector(per_task_grads)
+                    
+                    # Apply the combined gradient vector manually
                     self.optimizer.zero_grad()
                     offset = 0
-                    for p, n in zip(params, numels):
-                        segment = update_vec[offset: offset + n].view(p.shape)
-                        p.grad = segment.clone()
+                    for p, n in zip(params_with_grad, numels):
+                        p.grad = update_vec[offset: offset + n].view(p.shape).clone()
                         offset += n
-                    manual_update_applied = True
-                    stacked_losses = torch.stack([loss.detach() for loss in unweighted.values()]) if unweighted else torch.tensor([0.0], device=self.device)
-                    loss_dict_or_tensor = {'total_loss': stacked_losses.mean()}
-                    for task_name, task_loss in unweighted.items():
-                        loss_dict_or_tensor[f'unweighted_{task_name}_loss'] = task_loss.detach()
-                else:
-                    loss_dict_or_tensor = self.loss_fn(predictions, masks_for_loss)
-                    if isinstance(loss_dict_or_tensor, dict):
-                        diagnostics_payload.update(self._extract_weighting_diagnostics())
 
-            # Standardize loss handling for logging (outside autocast)
-            if isinstance(loss_dict_or_tensor, dict):
-                total_loss = loss_dict_or_tensor['total_loss']
-                for key, val in loss_dict_or_tensor.items():
-                    if torch.is_tensor(val):
-                        scalar = float(val.detach().item())
-                        self.training_log[key].append(scalar)
-                        epoch_train_losses[key].append(scalar)
-            else:
-                total_loss = loss_dict_or_tensor
-                scalar = float(total_loss.detach().item())
-                self.training_log['total_loss'].append(scalar)
-                epoch_train_losses['total_loss'].append(scalar)
-
-            if self.weighting_strategy and self.weighting_strategy.requires_manual_backward_update():
-                self.weighting_strategy.manual_backward_update(self.model)
-
-            raw_total_loss_value = float(total_loss.detach().item())
-
-            if manual_update_applied:
-                if (i + 1) % self.config.gradient_accumulation_steps == 0 or (i + 1) == len(self.train_loader):
-                    base_optimizer = getattr(self.optimizer, 'optimizer', self.optimizer)
-                    self._maybe_clip_gradients(base_optimizer, params)
-                    base_optimizer.step()
-                    self.optimizer.zero_grad()
+                    self._maybe_clip_gradients(self.optimizer, params_with_grad)
+                    self.optimizer.step()
                     self.scheduler.step()
-            elif self.pcgrad_enabled:
-                self.optimizer.zero_grad()
-                self._apply_pcgrad(loss_dict_or_tensor)
-                self.optimizer.zero_grad()
-                self.scheduler.step()
-            else:
-                total_loss = total_loss / self.config.gradient_accumulation_steps
-                use_fp16_scaler = self.scaler.is_enabled()
-                if use_fp16_scaler:
-                    self.scaler.scale(total_loss).backward()
-                else:
-                    total_loss.backward()
 
-                if (i + 1) % self.config.gradient_accumulation_steps == 0 or (i + 1) == len(self.train_loader):
-                    if use_fp16_scaler:
+                    # For logging and diagnostics
+                    diagnostics_payload.update(self.weighting_strategy.get_last_diagnostics())
+                    loss_dict_for_logging = unweighted_losses
+                    total_loss_for_logging = torch.stack(list(unweighted_losses.values())).mean() if unweighted_losses else torch.tensor(0.0)
+
+                else:
+                    # --- Path 3: Standard Loss Weighting (e.g., Uncertainty, DWA) ---
+                    loss_dict = self.loss_fn(predictions, masks_for_loss)
+                    total_loss = loss_dict['total_loss']
+                    
+                    # Normalize for gradient accumulation
+                    accum_loss = total_loss / self.config.gradient_accumulation_steps
+                    
+                    self.scaler.scale(accum_loss).backward()
+
+                    if (i + 1) % self.config.gradient_accumulation_steps == 0:
                         self.scaler.unscale_(self.optimizer)
-                    self._maybe_clip_gradients(self.optimizer)
-                    if use_fp16_scaler:
+                        self._maybe_clip_gradients(self.optimizer)
                         self.scaler.step(self.optimizer)
                         self.scaler.update()
-                    else:
-                        self.optimizer.step()
-                    self.optimizer.zero_grad()
-                    self.scheduler.step()
+                        self.optimizer.zero_grad()
+                        self.scheduler.step()
+                    
+                    # For logging and diagnostics
+                    diagnostics_payload.update(self._extract_weighting_diagnostics())
+                    loss_dict_for_logging = loss_dict
+                    total_loss_for_logging = total_loss
 
-            self.training_log['lr'].append(self.scheduler.get_last_lr()[0])
+            # --- Unified Logging (outside autocast context) ---
+            raw_total_loss_value = float(total_loss_for_logging.detach().item())
             loop.set_postfix(loss=raw_total_loss_value)
 
+            for key, val in loss_dict_for_logging.items():
+                if torch.is_tensor(val):
+                    scalar_val = float(val.detach().item())
+                    self.training_log[key].append(scalar_val)
+                    epoch_train_losses[key].append(scalar_val)
+
+            if 'total_loss' not in epoch_train_losses: # Ensure total_loss is always present
+                 epoch_train_losses['total_loss'].append(raw_total_loss_value)
+
+            self.training_log['lr'].append(self.scheduler.get_last_lr()[0])
             self._maybe_record_loss_diagnostics(epoch_index, diagnostics_payload)
             self.global_step += 1
 
-        # Aggregate means and namespace
-        raw_means = {k: float(sum(v)/len(v)) for k, v in epoch_train_losses.items() if len(v) > 0}
+        # --- End of Epoch Aggregation ---
+        raw_means = {k: float(sum(v)/len(v)) for k, v in epoch_train_losses.items() if v}
         if self.weighting_strategy and hasattr(self.weighting_strategy, 'update_epoch_losses'):
             self.weighting_strategy.update_epoch_losses(raw_means, epoch=epoch_index)
-        aggregated = {f"train_{k}": v for k, v in raw_means.items()}
-        return aggregated
+        
+        return {f"train_{k}": v for k, v in raw_means.items()}
 
     def _collect_weighted_task_losses(self, loss_dict: Dict[str, torch.Tensor]) -> List[torch.Tensor]:
         losses: List[torch.Tensor] = []
@@ -300,26 +285,29 @@ class Trainer:
                         )
         return losses
 
-    def _apply_pcgrad(self, loss_dict_or_tensor: Any) -> None:
-        if not isinstance(loss_dict_or_tensor, dict):
-            raise ValueError("PCGrad requires loss function to return a dict with weighted components")
-        task_losses = self._collect_weighted_task_losses(loss_dict_or_tensor)
-        consistency = loss_dict_or_tensor.get('consistency_loss')
-        if isinstance(consistency, torch.Tensor) and consistency.requires_grad:
-            task_losses.append(self.loss_fn.w_consistency * consistency)
-        elif isinstance(consistency, torch.Tensor) and not consistency.requires_grad and self.loss_fn.w_consistency:
-            warnings.warn("Consistency loss lacks gradients; excluded from PCGrad update", RuntimeWarning)
+    def _apply_pcgrad(self, predictions, targets) -> None: # It now needs predictions and targets
+        """
+        Computes unweighted task losses and applies PCGrad projection.
+        This method bypasses the weighting_strategy entirely.
+        """
+        if not self.pcgrad:
+            return
+
+        # 1. Get the raw, unweighted losses directly from the loss function
+        unweighted_losses = self.loss_fn.compute_unweighted_losses(predictions, targets)
+        task_losses = list(unweighted_losses.values())
+
         if not task_losses:
-            total_loss = loss_dict_or_tensor.get('total_loss')
-            if isinstance(total_loss, torch.Tensor) and total_loss.requires_grad:
-                task_losses.append(total_loss)
-            else:
-                raise RuntimeError("PCGrad received no differentiable losses for gradient computation")
+            raise RuntimeError("PCGrad received no differentiable losses for gradient computation. Check task names and data.")
+
+        # 2. Compute per-task gradients based on unweighted losses
         params = [p for p in self.model.parameters() if p.requires_grad]
         task_grads = [
             torch.autograd.grad(loss, params, retain_graph=True, allow_unused=True)
             for loss in task_losses
         ]
+
+        # 3. Perform the PCGrad step
         self.pcgrad.step(task_grads, params, grad_clip_config=self.gradient_clipping_config or None)
 
     @staticmethod

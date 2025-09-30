@@ -1,3 +1,4 @@
 {
-  "test_total_loss": 3.6220169067382812
+  "test_total_loss": 3.5376309156417847,
+  "test_unweighted_flattened_loss": 3.5376309156417847
 }

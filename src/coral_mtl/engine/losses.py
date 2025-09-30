@@ -40,6 +40,17 @@ class HybridSegmentationLoss(nn.Module):
         )
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+
+        # first handle potential scenario of completely missing non-ignored targets
+        targets_long = targets.long()
+        valid_mask = (targets_long != self.ignore_index)
+        if not valid_mask.any():
+            # If there are no valid pixels in the target, the loss is zero
+            # and should not contribute any gradients.
+            print("Warning: No valid target pixels found; returning zero loss")
+            return torch.tensor(0.0, device=logits.device, requires_grad=True)
+        
+        # habdle potential NaNs in inputs
         if torch.any(torch.isnan(logits)):
             print("Warning: NaN detected in HybridSegmentationLoss logits")
             return torch.tensor(1.0, device=logits.device, requires_grad=True)
@@ -48,7 +59,6 @@ class HybridSegmentationLoss(nn.Module):
             print("Warning: NaN detected in HybridSegmentationLoss targets")
             return torch.tensor(1.0, device=logits.device, requires_grad=True)
 
-        targets_long = targets.long()
         loss_primary = self.focal_loss(logits, targets_long)
         loss_dice = self.dice_loss(logits, targets_long)
         if torch.isnan(loss_dice):
@@ -158,7 +168,7 @@ class CoralLoss(nn.Module):
             return next(iter(predictions.values())).device
         if targets:
             return next(iter(targets.values())).device
-        return torch.device("cpu")
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def compute_unweighted_losses(
         self,

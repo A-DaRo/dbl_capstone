@@ -373,11 +373,15 @@ class ExperimentFactory:
 
         if loss_type == "CompositeHierarchical" and not primary_tasks:
             raise ValueError("CompositeHierarchical loss requires 'model.tasks.primary' to be defined in the config.")
-
+        
+        
         if loss_type in {"CompositeHierarchical", "HybridLoss"}:
             if loss_type == "CompositeHierarchical":
                 weighting_cfg = loss_config.get('weighting_strategy')
                 strategy = build_weighting_strategy(weighting_cfg, primary_tasks, aux_tasks)
+                optimizer_config = self.config.get('optimizer', {})
+                if optimizer_config.get('use_pcgrad_wrapper', False):
+                    raise ValueError("PCGrad cannot be combined with a gradient weighting strategy.")
             else:
                 strategy = None
             loss_fn = build_loss(
