@@ -184,7 +184,7 @@ Focal loss addresses the extreme class imbalance problem by down-weighting well-
 Dice loss directly optimizes for spatial overlap (IoU), encouraging spatially coherent predictions. This is theoretically motivated by the observation that coral organisms form connected regions rather than scattered pixels.
 
 #### Consistency Regularization
-Our consistency loss penalizes logically inconsistent predictions (e.g., healthy coral in background regions), implementing domain knowledge as soft constraints on the model's output space.
+Our consistency loss penalizes logically inconsistent predictions (e.g., healthy coral in background regions), implementing domain knowledge as soft constraints on the model's output space. Note: this term is not currently enabled in the implementation; the active per-task loss is the hybrid Focal + Dice described above.
 
 ### 5.2. Hierarchical Loss Weighting
 
@@ -436,7 +436,7 @@ Specific hyperparameters are listed in the [Technical Specification](./technical
 
 The loss function is a composite, multi-part objective that reflects the hierarchical nature of our tasks and is designed to handle class imbalance and promote clean boundaries.
 
-*   **Total Loss:** A weighted sum of the primary and auxiliary task losses: `L_total = L_primary + w_aux * L_auxiliary`. The `w_aux` hyperparameter ensures the auxiliary tasks contribute as regularizers without overpowering the primary objectives.
+*   **Total Loss:** Aggregated by a strategy‑aware orchestrator. In practice, the unified `CoralLoss` combines per‑task hybrid losses using a configurable weighting strategy (default: Uncertainty), removing the need for a fixed auxiliary‑weight hyperparameter.
 
 *   **Primary Task Loss:** This component uses **uncertainty-based weighting** to automatically balance the Genus and Health tasks. It introduces two learnable parameters, `σ_genus` and `σ_health`, which represent the model's confidence in each task. The model learns to down-weight the loss of the task with higher uncertainty (i.e., the noisier or more difficult task), preventing it from dominating the gradient. The loss for each primary task is a **hybrid of Focal Loss and Dice Loss**:
     *   **Focal Loss:** Addresses the severe class imbalance *within* each task (e.g., common vs. rare genera) by down-weighting the loss for well-classified examples, forcing the model to focus on hard-to-classify ones.
@@ -444,7 +444,7 @@ The loss function is a composite, multi-part objective that reflects the hierarc
 
 *   **Auxiliary Task Loss:** This is a simpler sum of **Weighted Cross-Entropy** losses for the auxiliary tasks. A simpler loss is sufficient as their purpose is regularization, not high-fidelity output.
 
-The precise formulas are detailed in the [Technical Specification](./technical_specification.md#53-loss-functions).
+The precise formulas are detailed in the [Technical Specification](./technical_specification.md#53-loss-functions-and-weighting-refactored).
 
 ---
 

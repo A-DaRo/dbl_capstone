@@ -41,6 +41,7 @@ $$g_i \leftarrow g_i - \frac{\langle g_i, g_j \rangle}{\|g_j\|^2} g_j$$
 **When to Use:** You observe **frequent negative cosine similarity** spikes (< -0.5) in diagnostics. Can stack with Uncertainty weighting.  
 **Strength:** Simple, orthogonal add-on.  
 **Limit:** Does not address imbalance (different magnitudes) directly.
+**Compatibility:** Mutually exclusive with gradient-based weighting strategies (e.g., NashMTL, IMGrad) in this codebase; enforced by the factory when `optimizer.use_pcgrad_wrapper: true` and `loss.weighting_strategy` is gradient-based.
 **Diagnostics Logged:** `gradient_cosine_similarity` (indirect evidence of reduced conflicts post-projection).
 
 ### 2.3 IMGrad (Zhou et al., 2025)
@@ -68,7 +69,7 @@ Then update direction: \( d = G a \).
 
 ---
 ## 3. Diagnostic-Driven Strategy Selection
-Diagnostics are continuously written to `validation/loss_diagnostics.jsonl` (or training logs). Key fields:
+Diagnostics are periodically written during training to `<output_dir>/loss_diagnostics.jsonl` by the Trainer. Key fields:
 
 | Field | Meaning | Use For |
 |-------|---------|---------|
@@ -163,6 +164,7 @@ optimizer:
 
 ---
 This document should be kept in sync with implementation changes in:
+- `src/coral_mtl/engine/losses.py` (CoralLoss orchestrator and HybridSegmentationLoss)
 - `src/coral_mtl/engine/loss_weighting.py`
 - `src/coral_mtl/engine/gradient_strategies.py`
 - `src/coral_mtl/engine/pcgrad.py`

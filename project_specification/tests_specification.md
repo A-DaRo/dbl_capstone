@@ -193,13 +193,13 @@ Edge cases:
 
 ### 4.8 Engine — `engine/losses.py`
 
-CoralMTLLoss:
-- Forward returns dict with component losses and total; decreases under trivial overfit on tiny batch
-- Configurable weighting strategies properly instantiated and applied
-- Backward compatibility maintained for uncertainty weighting
+CoralLoss (Unified orchestrator):
+- Forward returns dict with `total_loss` and namespaced components; decreases under trivial overfit on tiny batch
+- Configurable weighting strategies properly instantiated and applied via `loss.weighting_strategy`
+- Baseline and MTL modes supported through `build_loss(splitter, ...)`; respects splitter-provided class counts
 
-CoralLoss:
-- Hybrid combination produces finite scalar; respects `ignore_index`
+HybridSegmentationLoss:
+- Per-task Focal + Dice combination; finite scalar; respects `ignore_index`
 
 Weighting Strategy Tests:
 - UncertaintyWeighting: learnable parameters update correctly, weights computed from uncertainties
@@ -209,6 +209,7 @@ Weighting Strategy Tests:
 PCGrad Tests:
 - Gradient projection removes conflicts (negative cosine similarities)
 - Optimizer wrapper maintains original optimizer behavior for non-conflicting gradients
+- Incompatibility enforced with gradient-based strategies (factory should raise when both configured)
 
 Acceptance:
 - Backward pass succeeds; grads finite; changing inputs changes loss meaningfully
@@ -301,6 +302,7 @@ TaskSplitter/MTLTaskSplitter/BaseTaskSplitter:
 
 Acceptance:
 - Known input labels transform to expected outputs; round‑trip checks where applicable
+- Pipeline enforcement: dataset classes require the correct splitter type; trainer asserts prediction/target shapes against splitter definitions
 
 Edge cases:
 - Unseen labels; empty id2label entries rejected with clear errors
@@ -312,6 +314,7 @@ MetricsStorer:
 
 Acceptance:
 - Files exist; JSON loads without errors; fields match schemas
+- Loss diagnostics stream present when training: `<output_dir>/loss_diagnostics.jsonl` contains periodic records with `strategy_type` and per-strategy fields
 
 Edge cases:
 - Validation vs test paths; concurrent writes avoided (single writer in Tier 2 handles JSONL)

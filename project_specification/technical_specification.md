@@ -367,44 +367,62 @@ class Evaluator:
 - **Advanced Analytics**: Surface distance, clustering, and panoptic metrics
 - **Result Persistence**: Detailed storage of per-image results and final reports
 
-### 5.3. Loss Functions
+### 5.3. Loss functions and weighting (refactored)
+
+The loss system is unified under a single orchestrator that supports both MTL and baseline models. Per-task losses use a robust hybrid formulation, and task aggregation is delegated to a pluggable weighting strategy.
 
 ```python
-class CoralMTLLoss(nn.Module):
-    """Complete multi-task loss with configurable weighting strategies."""
-    
-    def __init__(self, num_classes: Dict[str, int],
-                 primary_tasks: List[str],
-                 aux_tasks: List[str],
-                 weighting_strategy: WeightingStrategy,
-                 ignore_index: int = 0, w_consistency: float = 0.1,
-                 hybrid_alpha: float = 0.5, focal_gamma: float = 2.0):
-        """Initialize with configurable weighting strategy and hybrid loss components."""
-        
-    def forward(self, predictions: Dict[str, torch.Tensor],
-                targets: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        """Return comprehensive loss dictionary with all components."""
+class HybridSegmentationLoss(nn.Module):
+    """Task-level hybrid Focal + Dice loss with safe fallbacks."""
+    def __init__(self,
+                 hybrid_alpha: float = 0.5,
+                 focal_gamma: float = 2.0,
+                 dice_smooth: float = 1.0,
+                 ignore_index: int = 0):
+        ...
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        ...
+
 
 class CoralLoss(nn.Module):
-    """Flexible hybrid loss for baseline models."""
-    
-    def __init__(self, primary_loss_type: str = 'focal',
-                 hybrid_alpha: float = 0.5, focal_gamma: float = 2.0,
-                 dice_smooth: float = 1.0,
-                 class_weights: Optional[torch.Tensor] = None,
-                 ignore_index: int = 0):
-        """Initialize hybrid Focal/CE + Dice loss combination."""
-        
-    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        """Return combined loss value."""
+    """Unified loss orchestrator handling MTL and baseline configurations."""
+    def __init__(self,
+                 per_task_loss_fns: nn.ModuleDict,
+                 weighting_strategy: Optional[WeightingStrategy],
+                 mode: str,
+                 *,
+                 clipping_config: Optional[Dict[str, Any]] = None,
+                 task_splitter: Optional[TaskSplitter] = None):
+        ...
+
+    def compute_unweighted_losses(self,
+                 predictions: Dict[str, torch.Tensor] | torch.Tensor,
+                 targets: Dict[str, torch.Tensor] | torch.Tensor) -> Dict[str, torch.Tensor]:
+        ...
+
+    def forward(self,
+                 predictions: Dict[str, torch.Tensor] | torch.Tensor,
+                 targets: Dict[str, torch.Tensor] | torch.Tensor) -> Dict[str, torch.Tensor]:
+        """
+        Returns a dict with 'total_loss' and namespaced components like
+        'weighted_<task>_loss' and 'unweighted_<task>_loss'.
+        """
+
+
+def build_loss(splitter: TaskSplitter,
+               weighting_strategy: Optional[WeightingStrategy],
+               loss_config: Dict[str, Any]) -> CoralLoss:
+    """Factory: inspects splitter to choose mode and builds per-task HybridSegmentationLoss."""
 ```
 
-#### Loss Function Features:
-- **Configurable Weighting Strategies**: Uncertainty, NashMTL, IMGrad, and other advanced strategies
-- **Hybrid Loss Components**: Combines Focal/Cross-Entropy with Dice loss
-- **Consistency Regularization**: Penalizes logically inconsistent predictions
-- **Gradient Strategy Integration**: Support for PCGrad and advanced gradient manipulation
-- **Comprehensive Logging**: Returns detailed loss component breakdown
+Highlights:
+- Modes: `mtl` expects dict predictions/targets per task; `baseline` wraps single tensors under an internal task key.
+- Per-task loss is `HybridSegmentationLoss` with focal+dice combination and NaN-safe fallbacks.
+- Weighting strategies live in `engine/loss_weighting.py` (Uncertainty, DWA, GradNorm, IMGrad, NashMTL). Gradient-based strategies integrate with `Trainer` to compute manual update vectors.
+- PCGrad is available as an optimizer wrapper; it is mutually exclusive with gradient-based weighting strategies and enforced in the factory.
+
+Diagnostics stream:
+- The trainer periodically records loss diagnostics (e.g., task weights, log variances, gradient norms/angles) via `MetricsStorer.store_loss_diagnostics(...)` to `<output_dir>/loss_diagnostics.jsonl`.
 
 ### 5.4. Optimizer Factory
 
@@ -421,6 +439,7 @@ def create_optimizer_and_scheduler(
 - **Parameter Grouping**: Separate weight decay for different parameter types
 - **Polynomial Decay**: Stable learning rate schedule with warmup
 - **Transformer-Optimized**: Best practices for SegFormer-based architectures
+- **PCGrad Wrapper (optional)**: Enable `optimizer.use_pcgrad_wrapper: true` for projection-based conflict mitigation. Incompatible with gradient-based weighting strategies.
 
 ### 5.5. Multi-Task Weighting Strategies
 
@@ -600,11 +619,11 @@ class BaseTaskSplitter(TaskSplitter):
     flat_to_original_mapping_array: np.ndarray           # Inverse mapping for evaluation
 ```
 
-#### Task Splitter Features:
-- **Hierarchical Parsing**: Handles grouped/ungrouped task structures
-- **Global Label Space**: Creates unified, non-overlapping class space
-- **Mapping Arrays**: Efficient NumPy-based label transformations
-- **Validation Support**: Enables fair comparison between MTL and baseline models
+#### Task Splitter Features and enforcement (updated):
+- **Factory-enforced selection**: `ExperimentFactory` instantiates and caches the correct splitter based on `model.type` (`CoralMTL` → `MTLTaskSplitter`, `SegFormerBaseline` → `BaseTaskSplitter`).
+- **Dataset type checks**: `CoralscapesMTLDataset` requires an `MTLTaskSplitter`; `CoralscapesDataset` requires a `BaseTaskSplitter` and will raise `TypeError` otherwise.
+- **Training/validation shape assertions**: `Trainer` uses the splitter’s `hierarchical_definitions` to assert per-task prediction channel counts and target ranges.
+- **Global/flat mappings**: Splitters provide `global_mapping_array` and, for baseline, `flat_mapping_array` and `flat_to_original_mapping_array` to enable fair hierarchical evaluation.
 
 ### 6.2. Metrics Storage & Persistence
 
@@ -636,6 +655,7 @@ class MetricsStorer:
 - **Safe Writing**: Atomic file operations to prevent corruption
 - **Comprehensive Logging**: Stores both aggregated metrics and raw confusion matrices
 - **Flexible Output**: Supports both validation and testing workflows
+- **Loss diagnostics stream**: Additional `loss_diagnostics.jsonl` written during training with strategy diagnostics.
 
 ### 6.3. Comprehensive Visualization
 
@@ -733,19 +753,18 @@ data:
   pds_train_path: "./dataset/processed/pds_patches/"
   data_root_path: "./dataset/"
 
-# Loss Function Configuration
+# Loss Function Configuration (refactored)
 loss:
-  type: "CompositeHierarchical"
-  params:
-    w_consistency: 0.1
-    hybrid_alpha: 0.5
-    focal_gamma: 2.0
-    ignore_index: 0
-  # Advanced: Multi-task weighting strategy
-  weighting_strategy:
-    type: "NashMTL"  # "Uncertainty", "IMGrad", etc.
+    type: "CompositeHierarchical"   # MTL path; internally builds CoralLoss + strategy
     params:
-      update_frequency: 10
+        hybrid_alpha: 0.5
+        focal_gamma: 2.0
+        dice_smooth: 1.0
+        ignore_index: 0
+        task_specific: {}              # Optional per-task overrides
+    weighting_strategy:
+        type: "Uncertainty"            # or "DWA", "GradNorm", "IMGrad", "NashMTL"
+        params: {}
 
 # Optimization Configuration
 optimizer:
@@ -863,11 +882,11 @@ optimizer:
     warmup_ratio: 0.1
 
 loss:
-  type: "CompositeHierarchical"
-  params:
-    w_consistency: 0.1
-    hybrid_alpha: 0.5
-    focal_gamma: 2.0
+    type: "CompositeHierarchical"
+    params:
+        hybrid_alpha: 0.5
+        focal_gamma: 2.0
+        dice_smooth: 1.0
 
 trainer:
   epochs: 100
@@ -944,7 +963,7 @@ model:
     auxiliary: ["fish", "human_artifacts", "substrate", "coral_disease"]
 ```
 
-3. **Update Loss Function**: Add new task to auxiliary loss calculation in `CoralMTLLoss`
+3. **Update Loss Function**: `CoralLoss` automatically includes any task defined by the splitter. Use `loss.params.task_specific.<task>` for per-task loss overrides if required.
 
 4. **Update Metrics**: The system will automatically handle the new task through the TaskSplitter
 
@@ -1116,42 +1135,7 @@ scheduler = torch.optim.lr_scheduler.PolynomialLR(
 
 ---
 
-### 7. Loss Function: `src/coral_mtl/engine/losses.py`
-
-The composite loss is implemented as a single `nn.Module`.
-
-```python
-class CompositeHierarchicalLoss(nn.Module):
-    def __init__(self, aux_weight: float = 0.4, focal_alpha: float = 0.25, focal_gamma: float = 2.0):
-        super().__init__()
-        self.aux_weight = aux_weight
-        # Learnable uncertainty parameters for primary tasks
-        self.log_var_genus = nn.Parameter(torch.zeros(1))
-        self.log_var_health = nn.Parameter(torch.zeros(1))
-
-        self.focal_loss = FocalLoss(alpha=focal_alpha, gamma=focal_gamma)
-        self.dice_loss = DiceLoss()
-        self.ce_loss = nn.CrossEntropyLoss()
-
-    def forward(self, predictions: dict, targets: dict) -> torch.Tensor:
-        # Calculate hybrid loss for Genus
-        loss_genus = self.focal_loss(predictions['genus'], targets['genus']) + \
-                     self.dice_loss(predictions['genus'], targets['genus'])
-
-        # Calculate hybrid loss for Health
-        loss_health = self.focal_loss(predictions['health'], targets['health']) + \
-                      self.dice_loss(predictions['health'], targets['health'])
-
-        # Apply uncertainty weighting
-        primary_loss = (0.5 * torch.exp(-self.log_var_genus) * loss_genus + 0.5 * self.log_var_genus) + \
-                       (0.5 * torch.exp(-self.log_var_health) * loss_health + 0.5 * self.log_var_health)
-
-        # Calculate auxiliary losses
-        aux_loss = sum(self.ce_loss(predictions[t], targets[t]) for t in aux_tasks)
-
-        # Return total loss
-        return primary_loss + self.aux_weight * aux_loss
-```
+<!-- Legacy section removed; see Section 5.3 for the refactored CoralLoss/HybridSegmentationLoss implementation. -->
 
 ---
 
@@ -1203,7 +1187,10 @@ To add a new task (e.g., "Disease Segmentation") to the model:
 1.  **Update Label Mappings (`dataset.py`):** Add the logic to `_transform_mask` to create the new `disease` mask from the source 39-class annotation.
 2.  **Update Configuration (`configs/`):** In your experiment's YAML file, add `"disease": num_disease_classes` to the `model.num_classes` dictionary.
 3.  **Update Model (`core.py`):** The `CoralMTLModel` is designed to be extensible. As long as the new task is in the `num_classes` dictionary, the `__init__` loop will automatically create a new decoder and prediction head for it. You may need to decide if it's a primary (full decoder) or auxiliary (lightweight decoder) task.
-4.  **Update Loss Function (`losses.py`):** In `CompositeHierarchicalLoss`, add the calculation for `loss_disease`. If it's a new primary task, you must also add a new `nn.Parameter` for its uncertainty (`log_var_disease`) and include it in the `primary_loss` calculation. If it's an auxiliary task, simply add it to the `aux_loss` sum.
+4.  **Update Loss Orchestration (no code change typically):** `ExperimentFactory.get_loss_function()` calls `build_loss(...)` to construct a unified `CoralLoss` that automatically includes a `HybridSegmentationLoss` head for every task defined by the TaskSplitter. You generally do not edit code to “add a loss.” Instead:
+    - To customize this task’s loss hyperparameters, add overrides in the config under `loss.params.task_specific.<task>` (e.g., `hybrid_alpha`, `focal_gamma`, `dice_smooth`, `ignore_index`).
+    - To control weighting behavior, configure `loss.weighting_strategy` (e.g., Uncertainty, DWA, GradNorm, IMGrad, NashMTL). For Uncertainty, learnable log-variance parameters are created per task listed in `loss.weighting_strategy.params.learnable_tasks` (defaults to primary tasks); no manual parameter additions in code are needed.
+    - Strategy selection is enforced and wired in the factory; PCGrad cannot be combined with gradient-based strategies (IMGrad/NashMTL).
 5.  **Update Metrics (`metrics.py`):** Add the new task to the `MetricsCalculator` so its performance is tracked.
 6.  **Add Tests (`tests/`):** Add a test case to `test_dataset.py` to verify the new label transformation and update the model/loss tests to account for the new task.
 
