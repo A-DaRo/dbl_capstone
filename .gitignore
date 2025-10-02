@@ -2,7 +2,7 @@
 pds_training_patches/
 seaview/
 models/
-dataset/
+./dataset/
 .vscode/
 fake_output/
 
