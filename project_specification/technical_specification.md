@@ -1299,7 +1299,72 @@ Tier 2 per‑image outputs (JSONL) are designed for external aggregation (e.g., 
 - Read JSONL, group by metric/class, and compute aggregates
 - Join with Tier 1 final report for a complete evaluation dossier
 
-File locations and names are managed by `MetricsStorer` based on split (validation/test) and experiment output directory.
+---
+
+## 11.x Unified Global Metrics Fusion (Update)
+
+This update aligns baseline and MTL evaluation by enforcing a single GLOBAL label space for every Tier 1 metric.
+
+### A. Logit / Probability Unification
+MTL heads now fuse via a product‑of‑experts style log‑prob summation in ORIGINAL space, then marginalize ORIGINAL → GLOBAL using static maps provided by the TaskSplitter. Implementation: see `CoralMTLMetrics._fuse_heads_to_global_logits()` in [`coral_mtl.metrics.metrics`](src/coral_mtl/metrics/metrics.py).
+
+Baseline models: flat logits → ORIGINAL (gather) → GLOBAL (scatter‑add) → identical downstream path (handled inside [`coral_mtl.metrics.metrics.CoralMetrics`](src/coral_mtl/metrics/metrics.py)).
+
+### B. Tier 1 Metrics (Additions / Clarifications)
+New optimization keys emitted (all under `optimization_metrics`):
+- `global.Boundary_F1`, `global.Boundary_Precision`, `global.Boundary_Recall`
+- `global.NLL`, `global.Brier_Score`, `global.ECE`
+- Existing: `global.mIoU`, `global.BIoU`, task‑scoped `tasks.<task>.<level>.mIoU`, `tasks.<task>.<level>.BIoU`
+
+### C. Boundary & Calibration Implementation
+- Boundary IoU per task + global: GPU dilation (`gpu_binary_dilation`) with configurable `boundary_thickness`.
+- Boundary F1: accumulates TP / FP / FN across all non‑background classes globally.
+- Calibration metrics computed only when logits available (softmax path preserved). Absent logits ⇒ metrics gracefully zero.
+
+### D. Ignore / Background Semantics
+- `ignore_index` preserved through safe mapping helper `_safe_lookup`.
+- Background always retained (not dropped from macro metrics) for determinism across model types.
+
+### E. Async Per‑Image Storage
+Per‑image confusion matrices + prediction masks stream through `AsyncMetricsStorer` when `use_async_storage=True` (default), minimizing host‑side latency while keeping GPU accumulators hot. Falls back to synchronous writes if disabled.
+
+### F. Evaluator Enhancements
+[`coral_mtl.engine.evaluator.Evaluator`](src/coral_mtl/engine/evaluator.py) now:
+1. Performs sliding‑window inference, stitching logits before metrics update.
+2. Validates shape/class count per task (`_validate_predictions_targets_shape`) to catch config / checkpoint drift early.
+3. Passes logits directly to metrics for calibration + boundary metrics.
+4. Integrates optional AdvancedMetricsProcessor (Tier 2/3) without blocking Tier 1 completion.
+
+### G. Product‑of‑Experts Rationale
+Summing log‑probs (equivalent to multiplying calibrated per‑head probabilities before renorm) rewards consensus and softens disagreement—empirically stabilizing NLL / ECE versus naive averaging.
+
+### H. Backward Compatibility
+- Existing configs require no change.
+- Absence of logits (legacy code paths) yields identical confusion / boundary counts; probabilistic metrics revert to zeros.
+
+### I. Failure Modes Mitigated
+- Shape drift: early assertion.
+- Silent class misalignment: prevented by index‑gather maps at fusion stage.
+- Blocking I/O: decoupled via async storer flush on finalize.
+
+---
+
+## 11.x.1 Minimal Example (MTL Fusion)
+
+```python
+fused = metrics._fuse_heads_to_global_logits(logits_dict, splitter.global_mapping_torch)
+pred_global = fused.argmax(1)
+```
+
+---
+
+## 11.x.2 Optimization Metric Selection
+Model selection can now target:
+- `optimization_metrics.global.Boundary_F1`
+- `optimization_metrics.global.BIoU`
+- Any task‑scoped `tasks.<task>.<level>.mIoU`
+
+Configure via `trainer.model_selection_metric`.
 
 ---
 For theoretical background, see the [**Theoretical Specification**](./theorethical_specification.md).

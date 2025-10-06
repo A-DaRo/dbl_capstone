@@ -391,3 +391,22 @@ This pipeline is executed **only once** at the very end of the entire training p
     * **Stitching:** The patch-wise predictions are reassembled into a full-sized prediction map. For the overlapping regions, the logits (pre-softmax probabilities) from the different patches are **averaged** to produce a smooth, seamless final prediction. This blending is crucial for eliminating blocky artifacts at patch boundaries.
 *  **Final Metric Computation:** The final, reassembled segmentation maps are compared against the full-resolution ground-truth test masks. All evaluation metrics (mIoU, BIoU, etc.) are computed on these full maps.
 *  **Reporting:** These final metrics on the test set are the definitive results of the experiment and are the numbers that will be reported in the final publication.
+
+### Update: Unified Global Metrics & New Calibration Layer
+
+The metrics pipeline now guarantees identical evaluation coordinates for Baseline and MTL models:
+
+1. MTL heads fused (product‑of‑experts in ORIGINAL space) → marginalized to GLOBAL.
+2. Baseline flat logits gathered to ORIGINAL → marginalized to GLOBAL.
+3. All Tier 1 metrics (mIoU, BIoU, Boundary‑F1, NLL, Brier, ECE, TIDE errors) computed solely in GLOBAL space.
+
+Benefits:
+- True apples‑to‑apples comparisons.
+- Calibration metrics now selectable for diagnostic tracking.
+- Boundary statistics (IoU + F1) improve sensitivity to structural errors along coral edges.
+
+Selectable model selection metrics now include `global.Boundary_F1` and existing mIoU / BIoU variants.
+
+No configuration changes required; legacy runs remain compatible.
+
+---

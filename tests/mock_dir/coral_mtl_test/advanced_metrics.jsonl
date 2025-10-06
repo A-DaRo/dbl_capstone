@@ -1,0 +1,2 @@
+{"image_id": "site1_000001_016200_leftImg8bit.png", "timestamp": 1759748643.0331292, "VI": 0.0, "HD95": 0.0, "ARI": 0.0, "ASSD": 0.0, "PanopticQuality": {"pq": 0.0, "tp": 0, "fp": 4, "fn": 0, "iou_sum": 0.0}}
+{"image_id": "site1_000002_002600_leftImg8bit.png", "timestamp": 1759748660.7762616, "VI": 0.0, "HD95": 0.0, "ARI": 0.0, "ASSD": 0.0, "PanopticQuality": {"pq": 0.0, "tp": 0, "fp": 3, "fn": 0, "iou_sum": 0.0}}

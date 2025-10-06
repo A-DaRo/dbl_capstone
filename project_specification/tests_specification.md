@@ -959,4 +959,45 @@ pytest -vv --durations=15
 
 ---
 
-This specification should guide building and maintaining a robust test suite that validates both software engineering quality and scientific validity of Coral‑MTL.
+## New / Updated Tests (Metrics & Evaluation Pipeline Update)
+
+#### Micro Sanity (MTL Global Fusion)
+File: `tests/micro_metrics_mtl_sanity.py`
+Purpose:
+- Verifies perfect alignment scenario yields:
+  - `global.mIoU` ≈ 1.0
+  - Non‑zero `global.BIoU` & `global.Boundary_F1` when synthetic boundary exists
+- Confirms fused logits path (product‑of‑experts) produces consistent global distribution.
+
+#### Trial Smoke Runner
+File: `tests/trial_run_test.py`
+Purpose:
+- Lightweight end‑to‑end smoke for both baseline & MTL configs with and without PDS patch path override.
+- Extracts top optimization metrics post evaluation to ensure storer + evaluator integration remains intact.
+
+Acceptance (implicit):
+- Runs to completion on CPU.
+- Emits `test_metrics_full_report.json` with new keys:
+  - `global.Boundary_F1`, `global.NLL`, `global.Brier_Score`, `global.ECE`
+- No shape assertion failures inside `Evaluator`.
+
+### Updated Metric Assertions Guidance
+When adding / updating tests involving metrics:
+- Always reference metrics under `optimization_metrics` namespace.
+- For calibration metrics on synthetic deterministic logits:
+  - Perfect confidence on correct class ⇒ `ECE` near 0, `NLL` low.
+  - Uniform logits ⇒ higher `NLL`, `Brier_Score`, and non‑zero `ECE`.
+
+### Concurrency / Storage Notes
+If async storage is enabled (`use_async_storage=True`):
+- Tests should wait for `async_storer.wait_for_completion()` implicitly handled by `Evaluator.finally` block.
+- To unit test synchronous path: instantiate metrics with `use_async_storage=False`.
+
+### Regression Guard Additions
+Include new metric keys in any regression snapshot / JSON schema validation to prevent accidental removal:
+- `global.Boundary_F1`
+- `global.NLL`
+- `global.Brier_Score`
+- `global.ECE`
+
+---

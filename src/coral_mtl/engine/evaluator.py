@@ -125,13 +125,17 @@ class Evaluator:
         Returns:
             Dict[str, Any]: The final, nested dictionary of computed metrics.
         """
-        # --- Step 1: Load Best Model ---
-        if self.config.checkpoint_path is not None:
-            print(f"Loading best model checkpoint from: {self.config.checkpoint_path}")
-            self.model.load_state_dict(torch.load(self.config.checkpoint_path, map_location=self.device))
+        # --- Step 1: Load Best Model (safe when skipping training) ---
+        ckpt_path = getattr(self.config, "checkpoint_path", None)
+        if ckpt_path is not None and Path(ckpt_path).exists():
+            print(f"Loading best model checkpoint from: {ckpt_path}")
+            state = torch.load(ckpt_path, map_location=self.device)
+            missing, unexpected = self.model.load_state_dict(state, strict=False)
+            if missing or unexpected:
+                print(f"[warn] load_state_dict: missing={missing}, unexpected={unexpected}")
         else:
-            print("No checkpoint path provided, using current model weights")
-        
+            print("[warn] No checkpoint provided/found; evaluating with current model weights.")
+
         self.model.to(self.device)
         self.model.eval()
 
