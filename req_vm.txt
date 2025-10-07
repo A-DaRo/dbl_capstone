@@ -24,4 +24,4 @@ pytest
 pytest-cov
 cvxpy
 cvxopt
-ecoss
+ecos
