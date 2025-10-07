@@ -80,7 +80,7 @@ loss:
     w_consistency: 0.1
     hybrid_alpha: 0.5
     focal_gamma: 2.0
-    ignore_index: 0
+    ignore_index: 255
   weighting_strategy:
     type: "DWA"      
 
@@ -94,7 +94,7 @@ metrics:
   
   # The class index to be ignored during metric calculation.
   # This should be consistent with the ignore_index in the loss function.
-  ignore_index: 0
+  ignore_index: 255
 
   # Enable asynchronous storage to prevent blocking during per-image storage
   use_async_storage: true
