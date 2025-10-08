@@ -22,8 +22,8 @@ model:
   # The factory will look up these names in the task_definitions.yaml file
   # to determine the number of classes for each corresponding decoder head.
   tasks:
-    primary: ["genus", "health"]
-    auxiliary: ["fish", "human_artifacts", "substrate", "background", "biota"]
+    primary: ["genus", "health", "fish", "human_artifacts", "substrate", "background", "biota"]
+    auxiliary: []
 
 # --------------------------------------------------------------------------
 # Configuration for Datasets and DataLoaders
@@ -82,7 +82,7 @@ loss:
     focal_gamma: 2.0
     ignore_index: 255
   weighting_strategy:
-    type: "DWA"      
+    type: "ImGrad"      
 
 # --------------------------------------------------------------------------
 # Configuration for Metrics
