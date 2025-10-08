@@ -212,7 +212,8 @@ class IMGradStrategy(GradientUpdateStrategy):
     def _solve_mgda_qp(self, G: Tensor) -> Tensor:
         if not _SOLVERS_AVAILABLE['cvxopt']:
             raise RuntimeError("QP solver requested but `cvxopt` is unavailable.")
-        GTG = (G @ G.t()).detach().cpu().numpy()
+        # Convert to float32 first if BFloat16 (NumPy doesn't support BFloat16)
+        GTG = (G @ G.t()).detach().cpu().float().numpy()
         GTG = np.ascontiguousarray(GTG, dtype=np.float64)
         T = GTG.shape[0]
         if T == 1:
@@ -350,13 +351,15 @@ class NashMTLStrategy(GradientUpdateStrategy):
 
         T = G.shape[0]
         self._ensure_ccp_problem(T)
-        GTG = (G @ G.t()).detach().cpu().numpy()
+        # Convert to float32 first if BFloat16 (NumPy doesn't support BFloat16)
+        GTG = (G @ G.t()).detach().cpu().float().numpy()
         norm_factor = np.linalg.norm(GTG)
         if norm_factor <= 0:
             norm_factor = 1.0
         GTG_norm = GTG / norm_factor
 
-        prev_alpha_np = self._cached_weights.detach().cpu().numpy()
+        # Convert cached weights to numpy (also handling BFloat16)
+        prev_alpha_np = self._cached_weights.detach().cpu().float().numpy()
         alpha_t = prev_alpha_np.copy()
 
         vars = self._cvxpy_vars
