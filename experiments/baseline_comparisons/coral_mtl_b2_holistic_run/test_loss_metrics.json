@@ -1,0 +1,17 @@
+{
+  "test_weighted_genus_loss": 0.00025169076981599724,
+  "test_weighted_health_loss": 0.000332915556646301,
+  "test_weighted_fish_loss": 0.00040196799847483876,
+  "test_weighted_human_artifacts_loss": 0.07165504833312522,
+  "test_weighted_substrate_loss": 1.4570255972075199e-06,
+  "test_weighted_background_loss": 0.00016992269997806906,
+  "test_weighted_biota_loss": 0.0005405871894373575,
+  "test_total_loss": 0.07335359072407746,
+  "test_unweighted_genus_loss": 0.2452526972237119,
+  "test_unweighted_health_loss": 0.2745972850053495,
+  "test_unweighted_fish_loss": 0.07475627717452622,
+  "test_unweighted_human_artifacts_loss": 0.07284323675729405,
+  "test_unweighted_substrate_loss": 0.35998277548624547,
+  "test_unweighted_background_loss": 0.2555918990045178,
+  "test_unweighted_biota_loss": 0.06734580557542581
+}
