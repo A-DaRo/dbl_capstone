@@ -17,7 +17,7 @@ model:
 data:
   # The factory will first check if this is a valid local path. If not, it assumes
   # it's a Hugging Face Hub dataset ID.
-  dataset_name: "./dataset/coralscapes/"
+  dataset_name: "../coralscapes/"
 
   # Path to the pre-processed PDS-sampled training patches.
   # This is prioritized for the 'train' split, as specified in dataset.py.
@@ -25,7 +25,7 @@ data:
   
   # Path to the raw, full-image dataset. Used for 'val' and 'test' splits,
   # and as a fallback for 'train' if pds_train_path is not found.
-  data_root_path: "./dataset/coralscapes/"
+  data_root_path: "../coralscapes/"
 
   # The single source of truth for all class and task information.
   # Required for MTL models and for non-MTL models being evaluated on MTL tasks.

@@ -14,7 +14,7 @@ project_root = Path(__file__).parent.parent
 
 # Path to the root of the original 'coralscapes' directory
 # This directory should contain 'leftImg8bit' and 'gtFine' subdirectories
-DATASET_ROOT = project_root / "./dataset/coralscapes"  # TODO: Update this path!
+DATASET_ROOT = project_root / "../coralscapes"  # TODO: Update this path!
 
 # =============================================================================
 # OUTPUT CONFIGURATION
