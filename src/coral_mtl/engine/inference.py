@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
+from contextlib import nullcontext
 from typing import Dict, List, Tuple, Union
 
 class SlidingWindowInferrer:
@@ -77,8 +78,13 @@ class SlidingWindowInferrer:
         for i in range(0, num_patches, self.batch_size):
             batch_patches = patches[i:i + self.batch_size].to(self.device, non_blocking=True)
 
-            # Use mixed precision for faster inference and lower memory usage
-            with torch.amp.autocast('cuda'):
+            # Use mixed precision on CUDA; fall back to standard execution elsewhere
+            if hasattr(torch, "amp") and hasattr(torch.amp, "autocast") and self.device.type == "cuda":
+                autocast_context = torch.amp.autocast(device_type="cuda")
+            else:
+                autocast_context = nullcontext()
+
+            with autocast_context:
                 model_output = self.model(batch_patches)
 
             # Standardize model output to handle both MTL and non-MTL cases

@@ -1,0 +1,165 @@
+%TC:ignore
+\documentclass[12pt]{article}
+
+%================================================================================
+% PREAMBLE
+%================================================================================
+
+%----- Page Layout & Fonts ------------------------------------------------------
+\usepackage[utf8]{inputenc}       % Handle UTF-8 encoding
+\usepackage[T1]{fontenc}          % Use modern font encodings
+\usepackage{geometry}             % For setting page margins
+\geometry{a4paper, margin=1in}     % Set A4 paper with 1-inch margins on all sides
+\usepackage{lmodern}              % Use the Latin Modern font for a clean look
+\usepackage{microtype}            % Improves typography and justification
+
+%----- Math & Symbols -----------------------------------------------------------
+\usepackage{amsmath}              % For advanced math environments
+
+%----- Citations & Bibliography -------------------------------------------------
+\usepackage[
+    backend=biber,                % Use Biber backend (modern and flexible)
+    style=authoryear-comp,        % Citation style: (Author, Year)
+    sorting=nyt                   % Sort bibliography by name, year, title
+]{biblatex}
+\addbibresource{references.bib}   % Specify the name of your .bib file
+\usepackage{csquotes}             % For context-sensitive quotation marks with \enquote{}
+
+%----- Hyperlinks ---------------------------------------------------------------
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,      
+    urlcolor=cyan,
+    pdftitle={Coral Reef Monitoring with Computer Vision},
+    pdfauthor={Your Name},
+}
+
+%================================================================================
+% DOCUMENT START
+%================================================================================
+\begin{document}
+
+\section{Introduction: Context, Problem Background, and Motivation}
+\label{sec:introduction}
+
+\subsection{The Coral Reef Crisis: A Call for Actionable Intelligence}
+\label{sec:crisis}
+
+Coral reefs, often described as the rainforests of the sea, are among the most biodiverse and economically valuable ecosystems on Earth. Despite covering less than 0.1\% of the ocean floor, they support approximately one-third of all marine biodiversity and provide critical ecosystem services to over 500 million people through coastal protection, fisheries, and tourism. However, these vital ecosystems are facing an unprecedented existential threat. Global climate change, driven by anthropogenic greenhouse gas emissions, has led to a sustained increase in sea surface temperatures and ocean acidification. This has triggered mass coral bleaching events with increasing frequency and severity, causing catastrophic and widespread coral mortality. ReefSupport, as a global conservation-tech organization, operates on the front lines of this crisis, witnessing a rapid decline that threatens not only marine life but also human livelihoods. The core challenge is no longer merely documenting this decline but developing the capacity to monitor reef health at a speed and scale that enables proactive, data-driven conservation interventions. \textcolor{blue}{NEED REFERENCE}
+
+\subsection{Motivation: From Manual Analysis to Automated Monitoring}
+\label{sec:motivation}
+
+The traditional bottleneck in reef conservation has been the slow, laborious, and expensive process of manual data analysis. Marine biologists and volunteer divers collect vast quantities of underwater imagery, but the subsequent analysis---identifying coral species, quantifying benthic cover, and assessing health status---is a time-consuming expert task. As articulated by the stakeholder, this manual process means we are often \enquote{documenting extinctions rather than preventing them.} The sheer volume of visual data being collected far outpaces our capacity for analysis, creating a critical need for automated, reliable, and scalable technological solutions. Computer vision and machine learning offer a transformative opportunity to convert this deluge of pixels into actionable intelligence, enabling reef managers to make timely and informed decisions that can mean the difference between reef resilience and collapse. \textcolor{blue}{NEED REFERENCE}
+
+\subsection{The Evolution of Computer Vision in Coral Reef Monitoring}
+\label{sec:evolution}
+
+The application of computational methods to coral reef image analysis has evolved significantly over the past two decades, reflecting broader advancements in computer vision and machine learning. This progression can be understood through a timeline of key methodological shifts:
+
+\begin{description}
+    \item[\textbf{Early Semi-Automation (c. 2006):}] Initial efforts focused on accelerating manual annotation. A prime example is the \textbf{Coral Point Count with Excel extensions (CPCe)} program. This software streamlined the widely used random point count method by overlaying a matrix of random points onto an image. While the software automated the point generation and data tabulation, a human expert was still required to visually identify and label the species or substrate type beneath each point. CPCe represented a crucial step forward in efficiency but remained fundamentally reliant on manual, point-wise human input for classification \autocite{kohler2006cpce}.
+
+    \item[\textbf{Large-Scale Data Collection and Early Deep Learning (c. 2019):}] The next major leap was characterized by massive data collection efforts and the first applications of deep learning. The \textbf{Seaview Survey Photo-quadrat and Image Classification Dataset} exemplifies this era \autocite{gonzalez2019seaview}. By collecting over one million standardized photo-quadrats globally, this project created a dataset of unprecedented scale. Methodologically, it moved towards automation by using deep learning algorithms (e.g., VGG-16 networks) to estimate benthic cover from random point annotations. This marked a shift from computer-assisted manual annotation to fully automated classification, although the analysis was still rooted in the statistical estimations derived from sparse points rather than a complete, dense understanding of the image.
+
+    \item[\textbf{The Rise of Dense Segmentation and Foundation Models (c. 2024):}] More recently, the field has transitioned from sparse point classification to dense, pixel-wise semantic segmentation. The introduction of \textbf{CoralSCOP} represents this paradigm shift \autocite{zheng2024coralscop}. Built upon a large-scale dataset with full pixel-level annotations (CoralMask), CoralSCOP leverages the power of foundation models like the Segment Anything Model (SAM) to perform zero-shot segmentation of corals. This approach provides a far more granular output, generating precise masks that delineate the exact boundaries of coral colonies. This dense output is critical for accurate area-based metrics of coral cover and health. Furthermore, CoralSCOP introduced methods for analyzing coral bleaching by applying thresholding techniques to the segmented coral regions, directly addressing a key stakeholder need.
+
+    \item[\textbf{Comprehensive Semantic Scene Understanding (c. 2025):}] The current state-of-the-art is defined by the goal of comprehensive scene understanding, moving beyond just segmenting corals to classifying a wide array of benthic categories and health states simultaneously. \textbf{The Coralscapes dataset} is the first general-purpose, densely annotated semantic segmentation dataset designed for this purpose \autocite{sauder2025coralscapes}. Unlike its predecessors, which often focused on specific camera views (e.g., photo-quadrats) or a limited set of classes, Coralscapes provides 39 distinct benthic classes, including crucial distinctions between healthy, bleached, and dead corals across various growth forms. This rich, multi-dimensional labeling structure makes it uniquely suited to train models that can holistically interpret the reef environment, providing the nuanced data required for effective ecosystem management.
+\end{description}
+
+This technological progression---from semi-automated point counting to comprehensive semantic scene understanding---lays the groundwork for our proposed research. The availability of the Coralscapes dataset makes it possible, for the first time, to develop a model that simultaneously addresses the intertwined questions of coral taxonomy (\emph{what is it?}) and health (\emph{how is it?}), which is the central objective of this project.
+
+\section{Business and Data Understanding}
+\label{sec:understanding}
+
+\subsection{Summary of Prior Information and Methodological Gaps}
+\label{sec:gaps}
+
+As established in the historical timeline, coral monitoring has progressed from manual annotation to automated classification. The dominant approaches in the literature can be broadly categorized into two families, each with distinct trade-offs:
+
+\begin{enumerate}
+    \item \textbf{Sparse Point-Based Classification:} This method, foundational to tools like CPCe and later automated by systems described in studies like \emph{Monitoring of Coral Reefs Using Artificial Intelligence} \autocite{gonzalez2020monitoring}, involves classifying small image patches centered on randomly sampled points. While cost-effective and capable of producing high-level estimates of benthic cover, this approach is fundamentally limited. It provides a statistical proxy for coral cover rather than a precise, spatially-explicit measurement. It cannot delineate the exact boundaries of coral colonies, a critical requirement for tracking growth, lesion recovery, and fine-scale changes in reef structure.
+
+    \item \textbf{Dense Coral Segmentation:} More recent advancements, such as \textbf{CoralSCOP} \autocite{zheng2024coralscop}, have focused on dense segmentation using foundation models. This represents a significant leap forward, as it generates full pixel-wise masks for coral colonies. CoralSCOP demonstrates a powerful zero-shot ability to distinguish coral from non-coral backgrounds and introduces methodologies for sparse-to-dense conversion and subsequent bleaching analysis. However, its primary task is binary (coral vs. non-coral) or class-agnostic segmentation. While it can be fine-tuned for specific genera, it was not designed as an end-to-end system for holistically identifying both the taxonomy and the health status of every pixel in a complex scene.
+
+    \item \textbf{Dedicated Health Status Segmentation:} Parallel research, such as the causal learning-driven approach by \textcite{qin2025causal}, is specifically tackling the robust segmentation of health states (live, dead, bleached). This work highlights the complexity and importance of this task as a standalone research problem but does not inherently integrate it with fine-grained taxonomic classification.
+\end{enumerate}
+
+The critical gap identified from this prior art is the absence of a unified framework that addresses ReefSupport’s core need: a model that can simultaneously perform \textbf{dense segmentation of coral genera} and \textbf{dense segmentation of coral health status}. Solving these tasks in isolation is inefficient and fails to leverage their intrinsic ecological and visual relationship.
+
+\subsection{The Coralscapes Dataset: A Resource for Holistic Reef Analysis}
+\label{sec:dataset}
+
+To address the identified gap, this project will leverage the recently released \textbf{Coralscapes dataset} \autocite{sauder2025coralscapes}. This dataset is uniquely suited for our research objective and directly addresses the limitations of prior data sources. Its key properties are:
+
+\begin{itemize}
+    \item \textbf{Connection to the Problem:} Coralscapes is the first large-scale, general-purpose dataset designed for comprehensive semantic scene understanding in coral reefs. Crucially, it provides dense, pixel-level annotations for \textbf{both taxonomic groups and health-related states}. Its 39 benthic classes include categories like `Acropora Alive`, `Branching Dead`, and `Massive/Meandering Bleached`. This dual-label structure provides the exact ground truth needed to train a model that can answer a reef manager’s complete question: \enquote{What corals are present, and what is their condition?}
+    
+    \item \textbf{Data Properties and Robustness:} The dataset was collected across diverse environmental conditions, including varying depths, turbidity levels, and lighting, from 35 sites in the Red Sea. This aligns perfectly with the stakeholder's requirement for a model that is robust to \enquote{messy} field data, moving beyond the idealized conditions of standardized photo-quadrats. This inherent diversity in the training data is essential for building a model that can generalize to new, unseen reef environments.
+    
+    \item \textbf{Scale and Annotation Quality:} With over 2,000 images and 174,000 expert-annotated segmentation masks, Coralscapes provides a sufficient data volume to train complex deep learning models. The expert-driven, \enquote{speculation-free} annotation protocol ensures a high-quality, reliable ground truth, which is critical for developing a trustworthy and defensible model for conservation policy.
+\end{itemize}
+
+\subsection{Adopting a Multi-Task Learning (MTL) Framework}
+\label{sec:mtl}
+
+Given the dual-label nature of the Coralscapes dataset and the intertwined nature of the required outputs, a \textbf{Multi-Task Learning (MTL)} framework is the most theoretically sound and practically efficient approach.
+
+\begin{itemize}
+    \item \textbf{Definition and Rationale:} As defined by \textcite{kutvonen2020mtl}, Multi-Task Learning is a machine learning paradigm where a single model is trained to solve multiple related tasks concurrently. This is typically achieved using a shared network backbone that learns a common, rich feature representation of the input, from which multiple task-specific \enquote{heads} branch off to produce their respective outputs. In our context, the tasks are genus segmentation and health segmentation. The underlying visual features that define a coral's shape and structure (for the genus task) are intrinsically linked to the texture and color features that define its health (for the health task). An MTL model can learn to exploit these shared representations.
+    
+    \item \textbf{Benefits for the Project:} Adopting an MTL framework offers several key advantages over training separate models:
+        \begin{itemize}
+            \item \textbf{Improved Generalization and Performance:} By learning to solve two related tasks, the model is forced to develop a more robust and generalized internal representation of the input data. The shared learning process acts as a form of implicit regularization, often leading to better performance on both tasks compared to single-task models \autocite{kutvonen2020mtl}.
+            \item \textbf{Computational Efficiency:} A single, unified model is significantly more efficient for deployment in ReefSupport's `Open Coral AI` platform. It reduces memory footprint, lowers computational overhead, and simplifies the inference pipeline compared to running two separate, large segmentation models.
+            \item \textbf{Label Efficiency:} MTL leverages the combined supervisory signals from both annotation types (genus and health) for every pixel. This allows the model to learn more effectively from the available data, making the learning process more efficient.
+        \end{itemize}
+\end{itemize}
+
+In summary, the selection of the Coralscapes dataset provides the necessary data foundation, while the adoption of an MTL framework provides the ideal methodological structure to address ReefSupport's complex, multi-faceted monitoring challenge in a robust, efficient, and integrated manner.
+
+\section{Research Objective}
+\label{sec:objective}
+
+\subsection{Primary Research Objective}
+The primary objective of this research is to design, implement, and evaluate a multi-task learning (MTL) framework for the simultaneous semantic segmentation of coral genus and health status from underwater imagery. Leveraging the SegFormer architecture as a backbone and the Coralscapes dataset for training and evaluation, this project aims to produce a single, efficient model that provides a holistic understanding of reef composition and condition, directly addressing the core needs of ReefSupport's conservation monitoring efforts.
+
+\subsection{Motivation and Link to Project Context}
+This objective is directly motivated by the limitations of existing methodologies and the unique opportunities presented by new datasets and MTL paradigms. As established, ReefSupport requires a solution that moves beyond simple coral detection to provide nuanced, actionable intelligence on both the taxonomic composition (\emph{what is it?}) and the health (\emph{how is it?}) of a reef.
+\begin{itemize}
+    \item \textbf{Addressing Methodological Gaps:} Training separate models for genus and health is computationally inefficient for deployment and fails to exploit the intrinsic relationship between the two tasks. Conversely, a naive composite-class approach (e.g., `Acropora-Bleached`) would suffer from severe class imbalance and data sparsity.
+    \item \textbf{Leveraging Data Structure:} The Coralscapes dataset, with its dual-label annotation scheme, is explicitly designed to support an integrated analysis. An MTL framework is the most theoretically sound approach to capitalize on this structure, using the shared supervisory signal to learn a richer, more robust feature representation.
+\end{itemize}
+Our objective is therefore to validate the hypothesis that an MTL approach can outperform traditional single-task baselines in both accuracy and efficiency for this specific, ecologically critical problem.
+
+\subsection{Architectural Approach and Justification: Learning from the State-of-the-Art}
+The central design choice in an MTL system is \emph{how} information is shared between tasks. A review of the literature reveals several competing philosophies, which inform our proposed approach.
+\begin{enumerate}
+    \item \textbf{Hard Parameter Sharing (Shared Encoder, Separate Decoders):} The most straightforward approach involves using a shared encoder to learn a common feature representation, followed by two independent decoder heads for the genus and health tasks. While simple and robust, this method prevents the tasks from directly influencing each other during the higher-level decoding process.
+    \item \textbf{Prediction Distillation:} This philosophy extends the idea of shared features by positing that the \emph{final predictions} of one task can serve as a powerful input for another. Architectures based on this principle first generate preliminary outputs for several tasks. These outputs are then "distilled" and combined to produce refined, final predictions for a subset of those tasks. In our context, this would be akin to using a preliminary health-state map (e.g., 'bleached' vs. 'healthy') as an additional input channel to help the model refine the boundaries in the final genus segmentation. However, as noted by Crawshaw in his 2020 survey, this approach often imposes a rigid, sequential information flow, making simultaneous, reciprocal learning difficult, as one task must be computationally upstream from the other \autocite{crawshaw2020multi}.
+    \item \textbf{Explicit Feature Exchange (e.g., MTLSegFormer):} The most advanced philosophy, seen in models like MTLSegFormer, posits that tasks are not just related but complementary and should actively exchange information \autocite{goncalves2023mtlsegformer}. This is achieved via cross-attention mechanisms, where one task can directly query the feature maps of another to enrich its own representation.
+\end{enumerate}
+For the Coralscapes problem, the relationship between genus and health is deeply complementary. For example, identifying a patch of turf algae as \enquote{dead coral} versus \enquote{algae on rock} is far more certain if the model can recognize the underlying branching structure of an \emph{Acropora} skeleton. Therefore, this research will adopt the \textbf{explicit feature exchange} philosophy. We will design a novel decoder architecture inspired by MTLSegFormer, where the health segmentation head can directly query the feature maps of the genus segmentation head (and vice-versa) using a cross-attention mechanism. This will allow the model to explicitly leverage morphological context to make more accurate health assessments.
+
+\subsection{Assumptions and Scope Limitations}
+To ensure feasibility, the scope of this research is defined by the following assumptions and limitations:
+\begin{itemize}
+    \item \textbf{Primary Assumption:} The central hypothesis is that coral genus and health are complementary tasks, and that explicitly modeling their inter-dependencies via cross-attention will yield superior segmentation performance compared to architectures that use simple shared features or attention-based selection.
+    \item \textbf{Data Scope:} The model will be trained and evaluated exclusively on the Coralscapes dataset. Its performance on imagery from other biogeographic regions or collected with different camera systems is not within the scope of this evaluation.
+    \item \textbf{Human-in-the-Loop (HIL) Integration:} This project will \textbf{not} deliver a production-ready, fully operational Human-in-the-Loop (HIL) system for continuous model retraining. However, a core part of our approach is to lay the architectural groundwork for such a system. The \textbf{attention maps} generated by the cross-attention mechanism in our proposed MTL model can serve as a direct, quantifiable measure of model uncertainty. Regions where the model requires high cross-task attention or where attention scores are low/diffuse can be visualized as heatmaps. This directly addresses the stakeholder's need for a model that is \enquote{honest about its limitations} and provides a mechanism to flag challenging images for review by marine biologists, thus enabling a future HIL workflow.
+\end{itemize}
+
+\subsection{Criteria for an Adequate Solution}
+An adequate solution must satisfy the requirements of both methodological rigor and stakeholder utility. Success will be measured against the following criteria:
+\begin{itemize}
+    \item \textbf{Quantitative Performance:} The final MTL model's performance will be measured using the mean Intersection over Union (mIoU) metric for both the genus and health segmentation tasks. A successful outcome requires the MTL model to achieve a statistically significant improvement in mIoU over single-task SegFormer baselines trained for each task independently.
+    \item \textbf{Robustness:} The model must demonstrate robust performance across the diverse and challenging images within the Coralscapes test set, maintaining reasonable accuracy in conditions of variable lighting and turbidity.
+    \item \textbf{Interpretability and Uncertainty Quantification:} The model must generate attention maps that are qualitatively interpretable and can be used to highlight regions of low confidence. This provides the \enquote{quantifiable measure of uncertainty} required by ReefSupport to focus expert review and build trust in the automated system.
+\end{itemize}
+
+\printbibliography % This command prints the bibliography
+
+\end{document}
+%TC:endignore

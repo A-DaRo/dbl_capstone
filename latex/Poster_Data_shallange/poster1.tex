@@ -1,0 +1,226 @@
+% ===== Stakeholder Poster (Fixed pipeline width + full metrics table) =====
+\documentclass[21pt, a0paper, portrait,
+  margin=5mm, innermargin=10mm,
+  blockverticalspace=4mm, colspace=10mm, subcolspace=5mm]{tikzposter}
+
+\usepackage{graphicx}
+\usepackage{booktabs, tabularx, array}
+\usepackage{amsmath}
+\usepackage{enumitem}
+\usepackage{siunitx}
+\usepackage{hyperref}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, shapes.misc, matrix, calc}
+\graphicspath{{Result-figures/}}
+\sisetup{round-mode=places,round-precision=4}
+
+\usetheme{Simple}
+\usecolorstyle{Default}
+% High-contrast scheme
+\definecolor{ocean}{HTML}{0A4D68}
+\definecolor{reef}{HTML}{2A9D8F}
+\definecolor{coral}{HTML}{FF6F61}
+\definecolor{sand}{HTML}{F7F3E9}
+\colorlet{titlebgcolor}{ocean}
+\colorlet{titlefgcolor}{white}
+\colorlet{blocktitlebgcolor}{sand!60}
+\colorlet{blocktitlefgcolor}{ocean}
+\colorlet{backgroundcolor}{sand}
+
+\author{Coral-MTL: Hierarchical Multi-Task Learning for Coral Reef Health Assessment\vspace{15pt}}
+\institute{\textbf{Group 21} - Capstone Data Challenge (JBG060) - Eindhoven University of Technology \& ReefSupport}
+
+\setlist[itemize]{leftmargin=1.05em,itemsep=0.22em,topsep=0.1em}
+\setlist[enumerate]{leftmargin=1.3em,itemsep=0.22em,topsep=0.1em}
+
+\makeatletter
+\settitle{%
+  \vbox{
+    \begin{minipage}[c]{1.5\linewidth}
+      \color{titlefgcolor}
+      {\bfseries\scshape\VeryHuge \@title \par}
+      {\huge \@author \par}
+      {\Large \@institute \par}
+    \end{minipage}\hfill
+    \begin{minipage}[c]{0.25\linewidth}
+      \raggedleft
+      % \includegraphics[width=\linewidth]{qr_repo.png}
+    \end{minipage}
+  }
+}
+\makeatother
+
+\begin{document}
+\color{black}
+\maketitle
+
+\begin{columns}
+
+% ===================== LEFT COLUMN =====================================================
+\column{0.33}
+
+\block{(A) Context \& Motivation\vspace{-30pt}}{
+\textbf{Stakeholder need.} Imagery volume outpaces expert capacity. Actions require \emph{dense, boundary-accurate} maps answering \textbf{what} coral (genus) and \textbf{how} it is doing (alive/bleached/dead).
+
+\textbf{Why dense masks.} Point tools remain semi-manual and boundary-blind; cover \& lesion tracking depend on \textbf{perimeters}. Dense segmentation outputs areas \& edges directly.
+}
+
+\block{(B) Research Objective\vspace{-30pt}}{
+\textbf{Goal.} Build and evaluate a \emph{single} deployable model that jointly predicts \textbf{Genus} and \textbf{Health} masks with \textbf{better boundary quality} than a strong single-task baseline, while \textbf{reporting} probability reliability (ECE/NLL/Brier). \emph{We do not apply post-hoc calibration.}}
+
+\block{(C) Data \& Assumptions\vspace{-30pt}}{
+\textbf{Dataset.} \emph{Coralscapes dataset}; dense pixel labels over \textbf{39 benthic classes} incl.\ live/bleached/dead; in varied depth, turbidity, illumination.
+
+\textbf{Splits.} \emph{Site-level hold-out}; near-duplicate \& temporal separation; \emph{Poisson-disk sampling (PDS)} to reduce redundancy.
+
+\textbf{Augmentations.} Physics-plausible haze, color cast, blur.
+
+\textbf{Assumption.} Genus (morphology) and health (appearance) are complementary and should be learned together.
+}
+
+\block{(D) Approach \& Design Rationale\vspace{-30pt}}{
+\textbf{Architecture.} SegFormer encoder with \textbf{two primary heads} (Genus, Health) using \emph{explicit feature exchange}; \textbf{five lightweight auxiliaries} (Fish, Human artifacts, Substrate, Background, Biota) provide context to sharpen edges.
+
+\textbf{Losses/Optimization.} Dice + Focal; \textbf{IMGrad} for task-gradient balancing; 20 epochs. Both MTL variants in our results use IMGrad.
+
+\textbf{Reasoning.} Shared features + explicit exchange exploit complementarity; auxiliaries regularize and reduce background confusions without large compute cost.
+}
+
+% --------- (E) End-to-End Pipeline (fits column, no overflow) ----------
+\block{(E) End-to-End Pipeline\vspace{-30pt}}{
+\begin{center}
+\begin{tikzpicture}[
+  font=\Large,
+  node distance=7mm,
+  >=Latex,
+  rounded corners=10pt
+]
+\tikzset{
+  box/.style={
+    draw=titlebg, very thick, fill=white, align=center,
+    text width=0.90\linewidth, minimum height=1.8cm
+  }
+}
+
+\node[box] (img)  {\textbf{Field Imagery}\\  Video / Photos};
+\node[box, below=of img] (tile) {\textbf{Tiling \& Sampling}\\  Poisson-disk};
+\node[box, below=of tile] (aug)  {\textbf{Augmentations}\\  Haze / Blur / Color};
+\node[box, below=of aug]  (enc)  {\textbf{SegFormer B2 Encoder}\\  Multi-scale features};
+\node[box, below=of enc]  (dual) {\textbf{Dual Heads with Feature Exchange}\\\emph{Genus} \& \emph{Health}};
+\node[box, below=of dual] (aux)  {\textbf{Auxiliary Heads (optional)}\\  Fish / Human Artifacts / Substrate / Background / Biota};
+\node[box, below=of aux]  (train){\textbf{Losses \& Optimization}\\  Dice + Focal + IMGrad};
+\node[box, below=of train]  (eval) {\textbf{Evaluation}\\  Global mIoU / Global BIoU / Boundary-F1 / ECE / NLL / Brier};
+\node[box, below=of eval] (out)  {\textbf{Outputs}\\  Masks};
+
+\draw[->, very thick] (img)  -- (tile);
+\draw[->, very thick] (tile) -- (aug);
+\draw[->, very thick] (aug)  -- (enc);
+\draw[->, very thick] (enc)  -- (dual);
+\draw[->, very thick] (dual) -- (aux);
+\draw[->, very thick] (aux)  -- (train);
+\draw[->, very thick] (train) -- (eval);
+\draw[->, very thick] (eval) -- (out);
+\end{tikzpicture}
+\end{center}
+}
+
+% ===================== MIDDLE COLUMN ===================================================
+\column{0.34}
+
+\block{(F) MTL Variants - Focused vs Holistic\vspace{-30pt}
+}{
+\textbf{Shared core:} SegFormer B2 encoder + two primary heads (\textbf{Genus}, \textbf{Health}) with feature exchange.
+
+\textbf{MTL Focused (2-task).}
+\begin{itemize}
+  \item \emph{What:} Only genus \& health heads.
+  \item \emph{Why:} Optimizes on the two target tasks.
+\end{itemize}
+
+\textbf{MTL Holistic (7-task).}
+\begin{itemize}
+  \item \emph{What:} Sets all tasks as primary (Genus, Health, Fish, Human artifacts, Substrate, Background, Biota).
+  \item \emph{Why:} Context regularizes features and sharpens coral/non-coral boundaries.
+\end{itemize}
+}
+
+\vspace{-50pt}
+\block{(G) Metrics - what and why\vspace{-30pt}}{
+\textbf{Global mIoU} - class-mean IoU (overall agreement). \\
+\textbf{Global BIoU} - IoU on boundary bands (perimeter fidelity). \\
+\textbf{Boundary F1} - boundary precision/recall (over/under-seg). \\
+\textbf{Calibration (reported only)} - \textbf{ECE}/\textbf{NLL}/\textbf{Brier} describe probability reliability.
+
+\textit{Reasoning.} Decisions rely on perimeters and trustworthy probabilities; therefore boundary metrics are first-class, and calibration is documented for transparency.}
+
+\vspace{-50pt}
+\block{(H) Headline Results (KPIs)\vspace{-30pt}}{
+\includegraphics[width=\linewidth]{model_comparison_bar_3models.png}
+
+\textbf{Test set} (percentage gains). \textbf{MTL Holistic} improves over
+\textbf{Baseline} by \emph{+9.9\% mIoU}, \emph{+32.6\% Global BIoU}, and
+\emph{+28.9\% Boundary-F1}; and over \textbf{MTL Focused} by
+\emph{+5.8\% mIoU}, \emph{+15.6\% Global BIoU}, and \emph{+13.9\% Boundary-F1}.
+
+\textit{Meaning.} Cleaner perimeters $\Rightarrow$ better cover estimates and more faithful lesion-change boundaries.\vspace{50pt}
+{\renewcommand{\arraystretch}{1.22}\large
+\begin{tabularx}{\linewidth}{@{}l *{3}{>{\centering\arraybackslash}X}@{}}
+\toprule
+\textbf{Metric} & \textbf{Baseline} & \textbf{MTL Focused} & \textbf{MTL Holistic} \\
+\midrule
+Global mIoU $\uparrow$   & 0.3888 & 0.4039 & \textbf{0.4272} \\
+Global BIoU $\uparrow$   & 0.0937 & 0.1075 & \textbf{0.1243} \\
+Boundary F1 $\uparrow$   & 0.1714 & 0.1942 & \textbf{0.2211} \\
+ECE $\downarrow$         & \textbf{0.1014} & 0.1275 & 0.1423 \\
+NLL $\downarrow$         & \textbf{1.2239} & 1.3995 & 1.5162 \\
+Brier $\downarrow$       & 0.5016 & 0.4959 & \textbf{0.4937} \\
+\bottomrule
+\end{tabularx}
+
+\textit{Interpretation.} Holistic is best on segmentation/boundary; baseline is slightly better calibrated (lower ECE/NLL).}}
+
+\vspace{-50pt}
+\block{(I) What changed under the hood\vspace{-30pt}}{
+\includegraphics[width=\linewidth]{error_decomposition_3models.png}
+
+\textbf{Positives.} \textbf{Fewer classification errors} and \textbf{fewer background false positives} from Baseline $\rightarrow$ Focused $\rightarrow$ \textbf{Holistic}. \\
+\textbf{Negative.} \textbf{Missed regions (FN)} increase, conservative behavior in low contrast. \\
+\textit{Operational meaning.} Risk of \emph{underestimating} extent under poor visibility; mitigate via targeted data \& modest class-weighted focal on faint bleaching.
+}
+
+% ===================== RIGHT COLUMN ====================================================
+\column{0.33}
+
+\block{}{
+\includegraphics[width=\linewidth]{training_progress_3models.png}
+
+\textbf{Learning dynamics.} Holistic improves earlier and plateaus higher by $\sim$20 epochs $\Rightarrow$ prefer early stop and spend time on error analysis/data curation rather than longer training.
+}
+
+\vspace{-50pt}
+\block{(J) Class-Level Insights\vspace{-30pt}}{
+  \includegraphics[width=\linewidth]{genus_radar_comparison_all_models.png}\\
+  \textit{Genus} segmentation by model (IoU): Holistic MTL matches or exceeds others across most genera.\vspace{30pt}
+  
+  \includegraphics[width=\linewidth]{health_radar_comparison_all_models.png}\\
+  \textit{Health} segmentation by model (IoU): Holistic MTL shows consistent gains, largest for bleached coral.”
+}
+
+\vspace{-50pt}
+\block{(K) Choosing a model (evidence-based)\vspace{-30pt}}{
+\textbf{Choose \underline{MTL Holistic}} when boundary quality (BIoU/Boundary-F1) drives value (cover/lesion tracking) and background FPs are costly.
+
+\textbf{Choose \underline{Baseline}} when you prioritize raw probability reliability (lower ECE/NLL) and cannot yet curate low-contrast data to reduce FNs.
+
+\textbf{MTL Focused} is a middle ground with moderate boundary gains and smaller change in error profile.
+}
+
+\vspace{-50pt}
+\block{(L) Next Steps (specific \& testable)\vspace{-30pt}}{
+\textbf{Data/aug:} curate low-contrast/whitened scenes; mine algae-on-dead vs.\ rock; add rubble exemplars; boundary-focused augmentation (random contour erode/dilate). \\
+\textbf{Loss/opt:} modest class-weighted focal for faint bleaching; keep IMGrad for balance. \\
+\textbf{Validation:} cross-region hold-outs on partner imagery; monitor \textbf{mIoU}, \textbf{BIoU}/\textbf{Boundary-F1}, and \textbf{ECE/NLL/Brier}.
+}
+
+\end{columns}
+\end{document}

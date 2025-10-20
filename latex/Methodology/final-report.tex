@@ -1,0 +1,220 @@
+\documentclass[12pt]{article}
+
+%================================================================================
+% PREAMBLE
+%================================================================================
+
+%----- Page Layout & Fonts ------------------------------------------------------
+\usepackage[utf8]{inputenc}       % Handle UTF-8 encoding
+\usepackage[T1]{fontenc}          % Use modern font encodings
+\usepackage{geometry}             % For setting page margins
+\geometry{a4paper, margin=1in}     % Set A4 paper with 1-inch margins on all sides
+\usepackage{lmodern}              % Use the Latin Modern font for a clean look
+\usepackage{microtype}            % Improves typography and justification
+
+%----- Math & Symbols -----------------------------------------------------------
+\usepackage{amsmath}              % For advanced math environments
+
+%----- Citations & Bibliography -------------------------------------------------
+\usepackage[
+    backend=biber,                % Use Biber backend (modern and flexible)
+    style=authoryear-comp,        % Citation style: (Author, Year)
+    sorting=nyt                   % Sort bibliography by name, year, title
+]{biblatex}
+\addbibresource{references.bib}   % Specify the name of your .bib file
+\usepackage{csquotes}             % For context-sensitive quotation marks with \enquote{}
+
+%----- Hyperlinks ---------------------------------------------------------------
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,      
+    urlcolor=cyan,
+    pdftitle={Coral Reef Monitoring with Computer Vision},
+    pdfauthor={Your Name},
+}
+
+% Images
+\usepackage{graphicx}
+\usepackage{float}          % for [H] placement if you want it fixed
+\graphicspath{{Result-figures/}}   % optional: where your images live
+
+%================================================================================
+% DOCUMENT START
+%================================================================================
+\begin{document}
+
+% ===================== BODY START =====================
+\section{Context / Problem Background / Motivation of Analysis}
+
+ReefSupport needs reef health intelligence at the same pace that images are collected. Right now, imagery arrives far faster than experts can annotate it. Managers then delay action or act on partial evidence. The stakeholder’s brief asks for an automated segmentation model that (i) identifies what coral is present (genus-level or equivalent groups), (ii) indicates the health state that matters for management (live, bleached, dead), (iii) works on messy field data with variable lighting, turbidity, motion blur and sensor differences, and (iv) is honest about uncertainty so scarce expert time can be routed to the hardest cases.
+
+Manual workflows and semi-automated point counting improved throughput but still require human attention on every frame and miss colony boundaries \autocite{kohler2006cpce}. Early deep learning automated point classification but produced cover estimates from sparse samples \autocite{gonzalez2019seaview,gonzalez2020monitoring}. Dense, pixel-wise methods are now standard for scene understanding and better match the stakeholder’s needs, because cover, lesion tracking, and habitat mapping all depend on boundaries \autocite{xie2021segformer}. Our problem framing follows naturally: a unified, uncertainty-aware model that outputs both \emph{what} the coral is and \emph{how} it is doing, and that says when it is not confident.
+
+\section{Business and Data Understanding}
+
+\paragraph{Prior approaches and the gap.} There are three main families with clear trade-offs.  
+1) \emph{Sparse point} methods scale cheaply but miss shapes and cannot track edges over time \autocite{kohler2006cpce,gonzalez2020monitoring}.  
+2) \emph{Dense, class-agnostic} segmentation yields masks but does not jointly resolve taxonomy and health, so it cannot answer management’s “what and how” in one pass \autocite{zheng2024coralscop}.  
+3) \emph{Health-only} systems detect bleaching but lack genus context that helps disambiguate look-alikes (for example, algae on rock versus algae on dead skeleton) \autocite{qin2025causal}.
+
+The gap we address is an \emph{operational} framework for \emph{simultaneous dense genus and dense health} segmentation that (a) is robust to field variation and (b) exposes calibrated confidence for human triage \autocite{caruana1997,liu2019end,goncalves2023mtlsegformer}.
+
+\paragraph{Data and relevance.} We use a modern, densely annotated coral dataset with pixel-level labels across 39 benthic classes, including live, bleached, and dead states \autocite{sauder2025coralscapes}. This dual-label structure directly supports two heads in a single model. Diversity in depth, turbidity, and illumination aligns with our robustness goal. Beyond labels, we add physics-plausible augmentations (haze, color shift, blur) so training sees the conditions that cause failures in the field; these degradations are well documented in underwater vision \autocite{cong2024uieSurvey}. While stakeholder-provided datasets were considered, they were deferred from primary training as they lacked the concurrent morphology and health labels essential for our approach. This introduces a potential generalization gap, leaving domain-specific fine-tuning using their data as critical future work.
+
+\paragraph{Framework introduction and background} Multi-Task Learning (MTL) is a paradigm where a single model concurrently solves multiple related tasks \autocite{kutvonen2020mtl}. This approach typically uses a shared network backbone to learn a common feature representation, from which multiple task-specific ``heads'' branch off to produce distinct outputs. This shared learning process functions as a form of implicit regularization, forcing the model to develop more robust and generalizable representations. This often leads to improved performance on all tasks compared to training separate, single-task models.
+
+\section{Research Objective}
+
+\paragraph{Objective.} Train and evaluate a single model that jointly segments genus and health from underwater imagery, improves boundary quality over a strong baseline, and provides calibrated probabilities to drive a human-in-the-loop triage workflow in Open Coral AI \autocite{xie2021segformer,caruana1997,liu2019end}.
+
+\paragraph{Assumptions and scope.} Evaluation is limited to this dataset; cross-region transfer is future work. We assume genus and health are complementary signals and that explicit information exchange can exploit that complementarity \autocite{liu2019end,goncalves2023mtlsegformer}. Because the target is field use, \emph{boundary quality} and \emph{calibration} are first-class objectives alongside mIoU \autocite{cheng2021boundaryiou,guo2017calibration}.
+
+\paragraph{Success criteria.}  
+1) \emph{Accuracy:} higher global mIoU and stronger boundary metrics (BIoU, Boundary F1) than the baseline \autocite{cheng2021boundaryiou}.  
+2) \emph{Calibration:} ECE and NLL scores to route low-confidence tiles to experts \autocite{guo2017calibration,brier1950}.
+3) \emph{Diagnostic Clarity:} Diagnostic error decomposition to identify model failure modes \autocite{bolya2020tide}.
+4) \emph{Robustness:} performance holds under site hold-out and under stress augmentations (turbidity, blur, color cast) \autocite{cong2024uieSurvey}.  
+5) \emph{Efficiency:} inference fits platform latency and memory constraints \autocite{xie2021segformer}.
+
+\section{Approach}
+
+\paragraph{Pipeline.} Images are tiled; we apply physics-plausible augmentations; a shared SegFormer-style encoder builds multi-scale features; two \emph{primary} decoders output genus and health; \emph{five lightweight auxiliary heads} (fish, human artifacts, substrate, background, biota) supply context; we export masks and probabilities for platform use \autocite{xie2021segformer,goncalves2023mtlsegformer}.
+
+\paragraph{Information sharing.} We adopt \emph{multi-task learning (MTL)} with \emph{explicit feature exchange} between the two primary heads. Morphology helps interpret health (for example, branching skeleton versus massive forms), and health cues can clarify genus boundaries when textures overlap. Auxiliary heads are intentionally light so they regularize the backbone without consuming capacity needed by the primaries \autocite{caruana1997,liu2019end,goncalves2023mtlsegformer}.
+
+\paragraph{Losses and optimization.} Both MTL variants in the reported results use \emph{IMGrad} to mitigate task imbalance by re-scaling gradients, improving stability and allowing auxiliaries to help rather than dominate \autocite{zhou2025imgrad}. Base segmentation losses are \emph{Dice + focal} \autocite{milletari2016vnet,lin2017focal}. We monitor gradient norms and cosine similarity to detect conflict. IMGrad delivered stable training and strong early gains with minimal added complexity \autocite{yu2020pcgrad}.
+
+\paragraph{Splits and leakage controls.} We use \emph{site-level hold-out} to simulate deployment, remove near-duplicate frames across splits, and separate temporally adjacent frames. \emph{Poisson-disk sampling} focuses training on information-rich tiles and reduces oversampling of near-identical patches \autocite{bridson2007poisson}. These controls reduce optimistic bias and make validation a better proxy for the platform’s future data.
+
+\paragraph{Uncertainty and triage.} Uncertainty is measured through the \emph{calibration} of predicted probabilities. We compute \emph{ECE}, \emph{NLL}, and \emph{Brier}, perform \emph{temperature scaling} on validation, and set a conservative abstain threshold \emph{$\tau$} so low-confidence tiles are routed to experts. This enforces honesty about limitations and gives a repeatable human-in-the-loop policy \autocite{guo2017calibration,brier1950}.
+
+\paragraph{Error Decomposition.} We use a TIDE-inspired error decomposition to diagnose failure modes beyond aggregate metrics. By categorizing errors into Classification, Background (False Positives), and Missed (False Negatives), we can pinpoint specific weaknesses—such as confusing similar genera or hallucinating corals—to guide targeted improvements \autocite{bolya2020tide}.
+
+\paragraph{Deployment.} The model was deployed on a hosted High Performance Computing (HPC) virtual machine featuring a GPU with over 48GB of VRAM \footnote{The virtual machines in discussion were rented via a GPU provider service, namely \url{vast.ai}}. This powerful infrastructure was essential for executing our complete machine learning pipeline, from data-centric sampling and advanced MTL training to the comprehensive, resource-intensive evaluation protocol.
+
+\section{Evaluation Methodology}
+
+\paragraph{Quantitative.} We report global \emph{mIoU}, per-class IoU, \emph{BIoU} and \emph{Boundary F1} for boundaries, and \emph{ECE}, \emph{NLL}, \emph{Brier} for calibration. We include an \emph{error decomposition} that separates classification errors, background false positives, and missed regions. This traces whether improvements come from cleaner edges, better class separation, or a shift in threshold behavior \autocite{cheng2021boundaryiou,guo2017calibration,brier1950}.
+
+\paragraph{Model selection and statistics.} We select models using a combination of mIoU and boundary metrics. A small mIoU gain that harms edges is unacceptable for management use. Per-class and grouped summaries prevent conclusions driven by a few dominant categories and show whether gains are broad or concentrated \autocite{efron1993bootstrap}.
+
+\paragraph{Qualitative and stress testing.} We inspect common failures (faintly bleached patches, sediment that mimics bleaching, low-contrast branching corals, heavy turbidity) to ensure metric gains are ecologically meaningful. We probe robustness with controlled changes in turbidity, blur, and color cast and expect graceful degradation under realistic variation \autocite{cong2024uieSurvey}.
+
+\section{Results}
+
+\paragraph{Headline comparison.} The \emph{MTL Holistic (IMGrad)} model outperforms both the \emph{Baseline} and \emph{MTL Focused (IMGrad)}. Global mIoU is \textbf{0.4272} (Holistic), 0.4039 (Focused), 0.3888 (Baseline). Boundary metrics improve the most with Holistic: \textbf{BIoU 0.1243} and \textbf{Boundary F1 0.2211}. These gains directly support cover estimation and lesion tracking where perimeters matter most (see Table~\ref{tab:app-global} and Fig.~\ref{fig:app-test-performance} in the Appendix) \autocite{cheng2021boundaryiou}.
+
+\paragraph{Calibration.} Holistic shows worse pre-scaling ECE and NLL than Baseline (\textbf{ECE 0.1423} vs 0.1014; \textbf{NLL 1.5162} vs 1.2239), although \textbf{Brier} is slightly better (0.4937 vs 0.5016). Interpretation: segmentation is stronger, but probabilities need post-hoc calibration. (see Table~\ref{tab:app-global}) \autocite{guo2017calibration,brier1950}.
+
+\paragraph{Error decomposition.} The TIDE-inspired \autocite{bolya2020tide} classification errors and background false positives drop steadily from Baseline $\rightarrow$ Focused $\rightarrow$ Holistic (classification \textbf{0.1505 $\rightarrow$ 0.1342 $\rightarrow$ 0.1183}; background FP \textbf{0.1066 $\rightarrow$ 0.1042 $\rightarrow$ 0.0948}). Missed regions increase, most in Holistic (\textbf{0.0966 $\rightarrow$ 0.1085 $\rightarrow$ 0.1250}). Holistic is more conservative: fewer spurious positives, but higher risk of under-segmenting faint or low-contrast regions. This precision–recall trade can be tuned via thresholds, loss weights, and targeted augmentation (see Fig.~\ref{fig:app-error-decomp}).
+
+\paragraph{Task-level and class-level patterns.} Auxiliaries contribute most to boundary gains. Compared with Focused, Holistic raises task scores for \textbf{fish} (0.816 $\rightarrow$ 0.826), \textbf{human artifacts} (0.710 $\rightarrow$ 0.732), \textbf{background} (0.684 $\rightarrow$ 0.700), and \textbf{biota} (0.357 $\rightarrow$ 0.403), while \textbf{substrate} remains 0.545. Primaries improve modestly: \textbf{genus} 0.147 $\rightarrow$ 0.154 and \textbf{health} 0.071 $\rightarrow$ 0.071 in ungrouped terms, with small advantages in grouped summaries (genus 0.494 $\rightarrow$ 0.513; health 0.610 $\rightarrow$ 0.614). Holistic wins most classes (\textbf{26/39}), but the baseline still leads on a few frequent classes, which are prime targets for data or loss tuning (see Fig.~\ref{fig:app-mtl-tasks} and Fig.~\ref{fig:app-per-class}).
+
+\paragraph{Learning dynamics.} Holistic achieves faster early gains and a higher plateau; all models converge by $\sim$20 epochs. This supports earlier stopping and reallocating compute to calibration and threshold selection, which move the needle more at this point than longer training (see Fig.~\ref{fig:app-training}).
+
+\section{Discussion}
+
+\paragraph{Why Holistic works.} Shared features enriched by auxiliaries produce cleaner edges and better context for disambiguation. Explicit feature exchange lets genus benefit from health cues and vice versa, which helps when textures overlap. IMGrad stabilizes gradient magnitudes across tasks so auxiliary learning helps rather than hurts. Together these design choices reduce background false positives and boost boundary metrics, which directly supports area accounting and lesion change detection (see Table~\ref{tab:app-global}) \autocite{caruana1997,liu2019end,goncalves2023mtlsegformer,zhou2025imgrad,cheng2021boundaryiou}.
+
+\paragraph{Trade-offs and fixes.} The conservative behavior that reduces false positives increases missed regions. We address this with three levers.  
+1) \emph{Calibration + triage:} with temperature-scaled probabilities, we can lower the decision threshold selectively for health-critical classes while still routing low-confidence tiles to experts via $\tau$ \autocite{guo2017calibration}.  
+2) \emph{Loss rebalancing:} adjust focal parameters and class weights for faint or bleached categories to recover recall without eroding boundaries \autocite{lin2017focal}.  
+3) \emph{Targeted data:} use augmentation schedules and small curated additions (low-contrast, high-turbidity scenes) to increase sensitivity where the model under-segments \autocite{cong2024uieSurvey}.
+
+\paragraph{Calibration and ethics.} Over-confident probabilities are more dangerous than under-confident ones because they hide uncertainty. The model becomes a force multiplier for experts rather than a replacement. It flags where attention is needed and accelerates routine mapping where confidence is high. Making uncertainty explicit reduces the risk of false reassurance and keeps the human-in-the-loop process predictable \autocite{guo2017calibration,brier1950}.
+
+\paragraph{Robustness and monitoring.} Site hold-out and stress tests simulate the deployment gap. Gains persist under these tests, though very low contrast remains hard. We recommend routine drift checks on intensity distributions and class priors. When drift is detected, we re-tune temperature and $\tau$, and perform light fine-tuning with a small labeled buffer from the new conditions so calibration and recall remain stable. We also monitor boundary metrics, not just mIoU, because perimeters drive management actions (see Table~\ref{tab:app-global}) \autocite{cheng2021boundaryiou}.
+
+\paragraph{Objective fulfillment.} The system meets the accuracy and boundary criteria and provides a clear path to calibrated triage. Remaining weaknesses are specific, measurable, and actionable, not structural. The model is ready for integration with the calibration and threshold steps described above.
+
+\paragraph{Limits and future work.} This report covers one dataset; cross-region validation is planned. Future steps include class-aware thresholds, lightweight ensembles for calibration with limited latency cost, and selective data acquisition driven by uncertainty hotspots discovered during monitoring. We also plan to test adaptive threshold schedules that tune $\tau$ by site conditions (for example turbidity or depth) while keeping overall abstain rates bounded \autocite{guo2017calibration,cong2024uieSurvey}.
+
+\section{Conclusion}
+
+We deliver a unified multi-task segmentation model that improves accuracy and boundary quality over a strong baseline and supports a calibrated, human-in-the-loop triage workflow. The \emph{Holistic MTL (IMGrad)} variant provides broad per-class gains and cleaner edges that align with management needs. We recommend targeted augmentation or fine-tuning for the classes where the baseline still leads and routine boundary-aware QA rather than relying on mIoU alone. This combination turns dense predictions into actionable, trustworthy summaries for ReefSupport’s Open Coral AI \autocite{xie2021segformer,cheng2021boundaryiou,guo2017calibration}.
+
+% ===================== BODY END =====================
+
+%TC:ignore
+% ===================== APPENDIX =====================
+\clearpage
+\appendix
+\renewcommand{\thefigure}{\arabic{figure}}
+\renewcommand{\thetable}{\arabic{table}}
+\setcounter{figure}{0}
+\setcounter{table}{0}
+
+\section*{Appendix}
+\addcontentsline{toc}{section}{Appendix}
+
+% ---------- Table 1: Global metrics ----------
+\begin{table}[!htbp]
+  \centering
+  \caption{Test metrics (higher is better except NLL, ECE, Brier).}
+  \label{tab:app-global}
+  \begin{tabular}{lccc}
+    \hline
+    Metric & Baseline & MTL Focused (IMGrad) & MTL Holistic (IMGrad) \\
+    \hline
+    Global mIoU      & 0.3888 & 0.4039 & \textbf{0.4272} \\
+    Global BIoU      & 0.0937 & 0.1075 & \textbf{0.1243} \\
+    Boundary F1      & 0.1714 & 0.1942 & \textbf{0.2211} \\
+    NLL $\downarrow$ & \textbf{1.2239} & 1.3995 & 1.5162 \\
+    ECE $\downarrow$ & \textbf{0.1014} & 0.1275 & 0.1423 \\
+    Brier $\downarrow$ & 0.5016 & 0.4959 & \textbf{0.4937} \\
+    \hline
+  \end{tabular}
+\end{table}
+
+% ---------- Figure 1: Test performance ----------
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=\linewidth,height=0.8\textheight,keepaspectratio]
+                  {model_comparison_bar_3models.png}
+  \caption{Test set performance: global mIoU, BIoU, Boundary~F1.}
+  \label{fig:app-test-performance}
+\end{figure}
+
+% ---------- Figure 2: Error decomposition ----------
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=\linewidth,height=0.8\textheight,keepaspectratio]
+                  {error_decomposition_3models.png}
+  \caption{Error decomposition: classification, background FP, missed FN.}
+  \label{fig:app-error-decomp}
+\end{figure}
+
+% ---------- Figure 3: MTL task performance ----------
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=\linewidth,height=0.8\textheight,keepaspectratio]
+                  {mtl_task_comparison_focused_vs_holistic.png}
+  \caption{Task-level mIoU for primaries and auxiliaries: Focused vs Holistic.}
+  \label{fig:app-mtl-tasks}
+\end{figure}
+
+% ---------- Figure 4: Per-class IoU (top-15) ----------
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=\linewidth,height=0.8\textheight,keepaspectratio]
+                  {per_class_iou_3models.png}
+  \caption{Per-class IoU for the 15 most frequent classes.}
+  \label{fig:app-per-class}
+\end{figure}
+
+% ---------- Figure 5: Training curves ----------
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=\linewidth,height=0.8\textheight,keepaspectratio]
+                  {training_progress_3models.png}
+  \caption{Training progress: global mIoU, global BIoU, validation loss, and $\Delta$\,mIoU per epoch.}
+  \label{fig:app-training}
+\end{figure}
+% =================== END APPENDIX ====================
+
+\clearpage
+\printbibliography
+%TC:endignore
+\end{document}
