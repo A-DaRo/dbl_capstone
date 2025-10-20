@@ -66,13 +66,17 @@ def get_config_for_experiment(experiment_path: Path) -> Optional[Path]:
     return mapping.get(resolved_experiment)
 
 
-def build_inference_ready_config(config_path: Path) -> Dict:
+def build_inference_ready_config(config_path: Path, subset_image_ids: Optional[List[str]] = None) -> Dict:
     """Produce a config dictionary tailored for lightweight CPU inference.
 
     The function clones the original configuration and adjusts dataset paths to
     fall back to the test fixtures when the referenced locations are missing.
     It also reduces data loader worker usage to avoid resource pressure during
     interactive notebook sessions.
+    
+    Args:
+        config_path: Path to the base configuration file.
+        subset_image_ids: Optional list of image IDs to filter the dataset to only those images.
     """
 
     base_config = load_yaml_config(config_path)
@@ -155,5 +159,9 @@ def build_inference_ready_config(config_path: Path) -> Dict:
 
     metrics_processor_cfg = config.setdefault("metrics_processor", {})
     metrics_processor_cfg["enabled"] = False
+
+    # Add subset filter if target image IDs are provided
+    if subset_image_ids is not None:
+        config["_inference_subset_image_ids"] = list(subset_image_ids)
 
     return config, fallback_used

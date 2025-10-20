@@ -33,10 +33,11 @@ _DEF_MEAN = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
 _DEF_STD = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
 
 
-def _load_factory(metadata: ExperimentMetadata) -> ExperimentFactory:
+def _load_factory(metadata: ExperimentMetadata, target_image_ids: Optional[Iterable[str]] = None) -> ExperimentFactory:
     if not metadata.config_path:
         raise ValueError(f"No configuration associated with experiment {metadata.name}.")
-    config, fallback_used = build_inference_ready_config(metadata.config_path)
+    subset_ids = list(target_image_ids) if target_image_ids is not None else None
+    config, fallback_used = build_inference_ready_config(metadata.config_path, subset_image_ids=subset_ids)
     return ExperimentFactory(config_dict=config)
 
 
@@ -91,9 +92,10 @@ def collect_task_predictions(
     - Falls back to tests dataset path if full dataset unavailable
     - Direct full-image inference without sliding window
     - Model loaded with best_model.pth weights in eval mode
+    - When target_image_ids provided, dataset is filtered to only those images
     """
 
-    factory = _load_factory(metadata)
+    factory = _load_factory(metadata, target_image_ids=target_image_ids)
     splitter = factory.task_splitter
     checkpoint_path = metadata.artifacts.get("checkpoint")
     if not checkpoint_path:

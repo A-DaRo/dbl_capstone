@@ -14,7 +14,7 @@ project_root = Path(__file__).parent.parent
 
 # Path to the root of the original 'coralscapes' directory
 # This directory should contain 'leftImg8bit' and 'gtFine' subdirectories
-DATASET_ROOT = project_root / "../coralscapes"  # TODO: Update this path!
+DATASET_ROOT = project_root / "../dataset/coralscapes"  # TODO: Update this path!
 
 # =============================================================================
 # OUTPUT CONFIGURATION
@@ -40,7 +40,7 @@ PDS_RADIUS = 300
 
 # Number of CPU cores to use for parallel processing
 # Set to None to use all available cores
-NUM_WORKERS = 32  # Will use os.cpu_count() if None
+NUM_WORKERS = None  # Will use os.cpu_count() if None
 
 # =============================================================================
 # TASK DEFINITION (OPTIONAL)

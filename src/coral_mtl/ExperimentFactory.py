@@ -11,7 +11,7 @@ import torch
 import os
 import yaml
 from typing import Dict, Any, Optional, Tuple, List
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 from pathlib import Path
 
@@ -27,7 +27,47 @@ from .metrics.metrics import AbstractCoralMetrics, CoralMTLMetrics, CoralMetrics
 from .engine.trainer import Trainer
 from .engine.evaluator import Evaluator
 from .utils.task_splitter import MTLTaskSplitter, BaseTaskSplitter
-from .metrics.metrics_storer import AdvancedMetricsProcessor, MetricsStorer 
+from .metrics.metrics_storer import AdvancedMetricsProcessor, MetricsStorer
+
+
+class FilteredDataset(Subset):
+    """Wrapper to filter dataset by image IDs while preserving getitem interface."""
+    
+    def __init__(self, dataset, target_image_ids: List[str]):
+        """
+        Filter dataset to only include samples with specified image IDs.
+        
+        Args:
+            dataset: The full dataset to filter
+            target_image_ids: List of image ID strings to keep
+        """
+        target_set = set(str(img_id) for img_id in target_image_ids)
+        indices = []
+        
+        # Build index mapping by checking each sample's image_id
+        for idx in range(len(dataset)):
+            try:
+                # Load just the image_id without full processing
+                if hasattr(dataset, 'hf_split_dataset') and dataset.hf_split_dataset is not None:
+                    example = dataset.hf_split_dataset[idx]
+                    image_id = str(example.get('id', f"hf_{dataset.split}_{idx}"))
+                elif hasattr(dataset, 'file_paths') and dataset.file_paths:
+                    img_path, _ = dataset.file_paths[idx]
+                    image_id = str(img_path.name)
+                else:
+                    continue
+                    
+                if image_id in target_set:
+                    indices.append(idx)
+            except Exception:
+                continue
+        
+        if not indices:
+            raise ValueError(f"No matching samples found for target image IDs: {target_image_ids}")
+        
+        super().__init__(dataset, indices)
+        print(f"Filtered {dataset.split} dataset from {len(dataset)} to {len(indices)} samples matching target IDs.")
+
 
 class ExperimentFactory:
     """
@@ -230,6 +270,9 @@ class ExperimentFactory:
 
         DatasetClass = CoralscapesMTLDataset if model_type == "CoralMTL" else CoralscapesDataset
         
+        # Check if we need to filter datasets by image IDs (for inference)
+        subset_image_ids = self.config.get('_inference_subset_image_ids', None)
+        
         self.dataloaders = {}
         # Resolve common DataLoader kwargs with sensible defaults and fallbacks
         # Prefer batch_size_per_gpu, else fall back to batch_size, else 4
@@ -254,6 +297,17 @@ class ExperimentFactory:
                 data_root_path=data_config.get('data_root_path'),
                 pds_train_path=data_config.get('pds_train_path')
             )
+            
+            # Apply subset filtering if specified (for targeted inference)
+            # Only filter if the split might contain the target images
+            if subset_image_ids is not None and split in ['validation', 'test']:
+                try:
+                    dataset = FilteredDataset(dataset, subset_image_ids)
+                except ValueError as e:
+                    # If no matching samples found in this split, keep the full dataset
+                    # This allows filtering to work across different splits
+                    print(f"[INFO] No target images found in {split} split, skipping filter: {e}")
+                    pass
 
             # Build DataLoader kwargs incrementally to keep compatibility across PyTorch versions
             dl_kwargs = dict(
