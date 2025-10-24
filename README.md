@@ -572,22 +572,7 @@ pytest  # Full suite including integration
 
 ---
 
-## Citation & References
-
-### Citing This Work
-
-```bibtex
-@misc{coral-mtl-2025,
-  title={Coral-MTL: Hierarchical Multi-Task Learning for Coral Reef Health Assessment},
-  author={Da Ros, Alessandro and Livanaj, Ergi and Patil, Sushrut and Radu, Alexandru and Merle, Gabriel and Lotko, Mateusz},
-  year={2025},
-  institution={Eindhoven University of Technology},
-  course={Capstone Data Challenge (JBG060)},
-  note={Group 21}
-}
-```
-
-### Key References
+## Key References
 
 - **Dataset**: Sauder et al. (2025) - Coralscapes: Densely annotated coral reef dataset
 - **Baseline**: Xie et al. (2021) - SegFormer: Simple and Efficient Design
