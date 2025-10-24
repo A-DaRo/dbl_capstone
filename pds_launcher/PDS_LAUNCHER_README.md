@@ -43,7 +43,7 @@ Edit `pds_config.py` to customize:
 ## Output Structure
 
 ```
-data/processed/pds_patches/          # Generated patches
+dataset/processed/pds_patches/       # Generated patches
 experiments/data_analysis/
 ├── pds_analysis/                    # Patch distribution analysis
 └── comparison_results/              # Original vs PDS comparison

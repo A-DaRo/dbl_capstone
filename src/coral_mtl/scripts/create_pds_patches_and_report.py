@@ -72,7 +72,7 @@ if __name__ == "__main__":
         help="Path to the root of the original 'coralscapes' directory (contains 'leftImg8bit' and 'gtFine')."
     )
     parser.add_argument(
-        "--pds_output_dir", type=str, default="./data/processed/pds_patches",
+        "--pds_output_dir", type=str, default="./dataset/processed/pds_patches",
         help="Directory where the PDS-generated patch dataset will be saved."
     )
     parser.add_argument(

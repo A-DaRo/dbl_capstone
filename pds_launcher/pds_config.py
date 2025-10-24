@@ -8,13 +8,14 @@ import os
 from pathlib import Path
 
 project_root = Path(__file__).parent.parent
+
 # =============================================================================
 # DATASET CONFIGURATION
 # =============================================================================
 
-# Path to the root of the original 'coralscapes' directory
-# This directory should contain 'leftImg8bit' and 'gtFine' subdirectories
-DATASET_ROOT = project_root / "../dataset/coralscapes"  # TODO: Update this path!
+# Path to the 'coralscapes' directory (one level above project root by default)
+# Expected structure: ../coralscapes/leftImg8bit/ and ../coralscapes/gtFine/
+DATASET_ROOT = project_root.parent / "coralscapes"
 
 # =============================================================================
 # OUTPUT CONFIGURATION
@@ -24,7 +25,7 @@ DATASET_ROOT = project_root / "../dataset/coralscapes"  # TODO: Update this path
 PDS_OUTPUT_DIR = project_root / "./dataset/processed/pds_patches"
 
 # Root directory for all analysis reports and plots
-ANALYSIS_OUTPUT_DIR = project_root / "./experiments/pds/data_analysis/no_task_def"
+ANALYSIS_OUTPUT_DIR = project_root / "experiments/pds/data_analysis/no_task_def"
 
 # =============================================================================
 # PATCH GENERATION PARAMETERS
