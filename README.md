@@ -589,7 +589,7 @@ pytest  # Full suite including integration
 
 - **Dataset**: Sauder et al. (2025) - Coralscapes: Densely annotated coral reef dataset
 - **Baseline**: Xie et al. (2021) - SegFormer: Simple and Efficient Design
-- **MTL Framework**: Liu et al. (2019) - End-to-End Multi-Task Learning with Attention
+- **MTL Framework**: Liu et al. (2019) - End-to-End Multi-Task Learning with Attention; D. N. Goncalves et al. (2023), MTLSegFormer: Multi-task Learning with Transformers for Semantic Segmentation in Precision Agricultures
 - **Gradient Balancing**: Zhou et al. (2025) - IMGrad: Balancing Gradient Magnitude
 - **Boundary Metrics**: Cheng et al. (2021) - Boundary IoU
 - **Error Decomposition**: Bolya et al. (2020) - TIDE: A General Toolbox
