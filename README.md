@@ -197,6 +197,11 @@ coral-mtl-project/
    pytest tests/coral_mtl_tests/data/ -v
    ```
 
+5. **MOCK run on CPU with small dataset**
+   ```bash
+   python tests/trial_run_test.py
+   ```
+
 ### Hardware Requirements
 
 **Training** (HPC/Cloud):
