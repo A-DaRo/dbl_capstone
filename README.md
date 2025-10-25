@@ -45,6 +45,14 @@ Coral-MTL is a hierarchical multi-task learning framework for automated coral re
 2. **MTL Focused** - 2 primary tasks (genus+health) + 5 auxiliary
 3. **MTL Holistic** - All 7 tasks as primary with full cross-attention (**best performer**)
 
+![alt text](/latex/Methodology/Result-figures/architecture_comparison.svg)
+
+### Cross-Attention layer
+
+Our MTL design is based on Explicit Feature Exchange, allowing for tasks to dynamically "query" each other for relevant context using a cross-attention mechanism. Given the necessity of making our model sustainable we develop a full cross-attention only for primary tasks (all MLP decoders) yet, to provide additional context we still enable feature-exchange of auxiliary tensors (1x1 convolutional blocks). In detail, primary decoders perform cross-attention: pooled Q from the task attends to concatenated K/V from all other tasks. Their enriched features are gated and fused with the original. Auxiliary heads (fish, human_artifacts, substrate) are lightweight; they provide K/V context but don’t attend, acting as regularizers.
+
+![alt text](/latex/Methodology/Result-figures/feature_exchange_detail.svg)
+
 ---
 
 ## Problem Statement & Context
