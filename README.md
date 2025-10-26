@@ -17,7 +17,7 @@
 6. [Data Pipeline](#data-pipeline)
 7. [Model Training](#model-training)
 8. [Evaluation & Results](#evaluation--results)
-9. [Reproducing Results](#reproducing-results) **-> This is where you find the main Jupyter Notebook for the reproduction of results, analysis, and plots.**
+9. [Reproducing Results](#reproducing-results) **-> (FOR TEACHING STAFF): This is where you find the main Jupyter Notebook for the reproduction of results, analysis, and plots.**
 10. [Testing & Quality Assurance](#testing--quality-assurance)
 11. [Documentation](#documentation)
 12. [Citation & References](#citation--references)
@@ -433,14 +433,14 @@ TIDE-inspired decomposition shows:
 
 ### Complete Pipeline Reproduction
 
-**Notebook**: `notebooks/FINAL_NOTEBOOK.ipynb`
-
-### ***Make sure to have installed all dependencies before running the Jupyter Notebook!***
+### ***Make sure to have installed all dependencies before running the Jupyter Notebook! Restart the Jupyter Notebook kernel after installation of the dependencies if necessary!***
 ```bash
 python.exe -m pip install --upgrade pip
 pip install -r requirements.txt
 pip install -e .
 ```
+
+**Notebook**: `notebooks/FINAL_NOTEBOOK.ipynb`
 
 **Execution** (laptop-friendly):
 ```bash
