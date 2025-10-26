@@ -113,23 +113,26 @@ Design a unified model that:
 ## Repository Structure
 
 ```
-coral-mtl-project/
+dbl_capstone/
 ├── configs/                          # YAML experiment configurations
 │   ├── baseline_comparisons/         # Production training configs
 │   └── task_definitions.yaml         # Hierarchical class definitions
 │
-├── data/                             # Dataset storage (external)
-│   ├── raw/coralscapes/              # Original images (not tracked)
-│   └── processed/pds_patches/        # PDS-sampled patches (generated)
+├── dataset/                          # Dataset storage
+│   └── processed/
+│       └── pds_patches/              # PDS-sampled patches (generated)
 │
 ├── experiments/                      # Training outputs
-│   └── baseline_comparisons/
-│       ├── coral_baseline_b2_run/    # Baseline results
-│       ├── coral_mtl_b2_focused_run/ # MTL Focused results
-│       └── coral_mtl_b2_holistic_run/# MTL Holistic results (best)
+│   ├── baseline_comparisons/
+│   │   ├── coral_baseline_b2_run/    # Baseline results
+│   │   ├── coral_mtl_b2_focused_run/ # MTL Focused results
+│   │   └── coral_mtl_b2_holistic_run/# MTL Holistic results (best)
+│   └── baselines_comparison/
+│       └── train_val_test_script.py  # HPC training orchestrator
 │
 ├── notebooks/                        # Analysis & visualization
-│   └── FINAL_NOTEBOOK.ipynb          # Complete results reproduction
+│   ├── FINAL_NOTEBOOK.ipynb          # Complete results reproduction
+│   └── utils/                        # Notebook helper utilities
 │
 ├── latex/                            # Report & poster source
 │   ├── Methodology/                  # Final report (LaTeX)
@@ -145,14 +148,11 @@ coral-mtl-project/
 │   ├── model/                        # Architecture components
 │   ├── engine/                       # Training, losses, optimizers
 │   ├── metrics/                      # 3-tier metrics system
+│   ├── scripts/                      # Utility scripts (PDS, analysis)
 │   └── utils/                        # Task splitters & helpers
 │
 ├── tests/                            # Pytest suite
 │   └── coral_mtl_tests/              # Mirrors src/ structure
-│
-├── scripts/                          # Standalone utilities
-│   └── experiments/baselines_comparison/
-│       └── train_val_test_script.py  # HPC training orchestrator
 │
 ├── requirements.txt                  # Python dependencies
 ├── pytest.ini                        # Test configuration
@@ -272,7 +272,7 @@ cd dbl_capstone
 
 **Configuration**: Edit `pds_launcher/pds_config.py`
 ```python
-DATASET_ROOT = Path("../dataset/coralscapes")  # Update this in case the dataset is elsewhere
+DATASET_ROOT = project_root.parent / "coralscapes"  # Points to ../coralscapes by default
 PATCH_SIZE = 512
 PDS_RADIUS = 300  # Minimum distance between patch centers
 ```
@@ -291,7 +291,7 @@ python pds_simple_script.py
 
 Inspect distribution:
 ```bash
-python scripts/analyze_patch_distribution.py \
+python src/coral_mtl/scripts/analyze_patch_distribution.py \
   --dataset_root dataset/processed/pds_patches \
   --output experiments/pds/data_analysis
 ```
@@ -304,8 +304,10 @@ python scripts/analyze_patch_distribution.py \
 
 Training is controlled via YAML configs in `configs/baseline_comparisons/`:
 
-- `baseline_config.yaml` - Single-task SegFormer
-- `mtl_config.yaml` - Multi-task variants (Focused/Holistic)
+- `baseline_config.yaml` - Single-task SegFormer baseline
+- `focused_mtl_config.yaml` - MTL with 2 primary tasks (genus, health) + 5 auxiliary
+- `holistic_mtl_config.yaml` - MTL with all 7 tasks as primary (best performer)
+- `mtl_config.yaml` - Generic MTL configuration template
 
 **Key parameters**:
 ```yaml
